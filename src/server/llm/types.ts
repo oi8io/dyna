@@ -35,14 +35,26 @@ export interface PlanInput {
   timeoutMs?: number;
 }
 
-export interface BuildInput extends PlanInput {
+export interface WriteFileInput extends PlanInput {
   plan: GenerationPlan;
+  /** The one file this call is responsible for. */
+  path: string;
+  intent: string;
+  /** Files already written in this run, path to content. */
+  drafts: Record<string, string>;
   onProgress?: (delta: StreamDelta) => void;
-  /** Present on a second pass after the build rejected the first attempt. */
+  /** Present on a second pass after the build rejected this file. */
   repair?: {
-    attemptedFiles: AgentFile[];
+    attempted: string;
     error: string;
   };
+}
+
+export interface WriteFileResult {
+  file: AgentFile;
+  provider: "fake" | "deepseek";
+  model: string;
+  usage: GenerationUsage;
 }
 
 export interface GenerationUsage {
@@ -58,20 +70,14 @@ export interface PlanResult {
   usage: GenerationUsage;
 }
 
-export interface GenerateGameResult {
-  /** Already merged with the previous version's untouched files. */
-  workspace: GeneratedWorkspace;
-  /** Only the paths this turn actually rewrote. */
-  changedPaths: string[];
-  prebuiltArtifactHtml?: string;
-  provider: "fake" | "deepseek";
-  model: string;
-  usage: GenerationUsage;
-}
-
 export interface GameGenerationProvider {
   /** Stage one: decide what to do, or ask. Writes no code. */
   plan(input: PlanInput): Promise<PlanResult>;
-  /** Stage two: implement the agreed plan. */
-  generate(input: BuildInput): Promise<GenerateGameResult>;
+  /** Stage two, once per planned file. */
+  writeFile(input: WriteFileInput): Promise<WriteFileResult>;
+  /**
+   * A ready-made artifact, when the provider has one and no build is needed.
+   * Only demo mode does; live generation always goes through a real build.
+   */
+  prebuiltArtifactHtml?(input: PlanInput): string | undefined;
 }

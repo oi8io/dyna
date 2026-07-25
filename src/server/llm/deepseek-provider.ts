@@ -1,37 +1,31 @@
 import type { StreamDelta } from "@/lib/generation-events";
 import type {
-  BuildInput,
   GameGenerationProvider,
-  GenerateGameResult,
   PlanInput,
   PlanResult,
+  WriteFileInput,
+  WriteFileResult,
 } from "@/server/llm/types";
 import { generationPlanSchema } from "@/server/llm/plan";
 import {
-  BUILD_PROMPT,
   PLAN_PROMPT,
   REPAIR_PROMPT,
+  WRITE_FILE_PROMPT,
   describeManifest,
 } from "@/server/llm/prompts";
 import { AgentStreamParser } from "@/server/llm/stream-parser";
 import { SPEC_PATH } from "@/server/llm/spec";
 import { getServerEnv } from "@/server/env";
-import { createGameWorkspace } from "@/server/template/game-template";
 import type { AgentFile } from "@/server/workspace/schema";
 import {
   extractAgentFiles,
   generatedFileSchema,
-  isEditableAgentPath,
-  mergeAgentFiles,
   validateAgentFiles,
 } from "@/server/workspace/schema";
 import { z } from "zod";
 
-const buildResponseSchema = z.object({
-  title: z.string().min(1).max(120),
-  summary: z.string().min(1).max(500),
-  files: z.array(z.unknown()).min(1).max(16),
-  deleted: z.array(z.string().min(1).max(240)).max(8).default([]),
+const writeResponseSchema = z.object({
+  files: z.array(z.unknown()).min(1).max(4),
 });
 
 function stripCodeFence(value: string) {
@@ -288,21 +282,34 @@ export class DeepSeekGameProvider implements GameGenerationProvider {
     };
   }
 
-  async generate(input: BuildInput): Promise<GenerateGameResult> {
+  async writeFile(input: WriteFileInput): Promise<WriteFileResult> {
     const env = getServerEnv();
-    const previousAgentFiles = input.previousWorkspace
-      ? extractAgentFiles(input.previousWorkspace)
-      : [];
+
+    const written = Object.entries(input.drafts)
+      .map(([path, content]) => `--- ${path} (already written) ---\n${content}`)
+      .join("\n\n");
+    const pending = input.plan.changes
+      .filter(
+        (change) =>
+          change.path !== input.path && !(change.path in input.drafts),
+      )
+      .map((change) => `${change.path} — ${change.intent}`)
+      .join("\n");
 
     const messages: ChatMessage[] = [
-      { role: "system", content: BUILD_PROMPT },
+      { role: "system", content: WRITE_FILE_PROMPT },
       {
         role: "user",
         content: [
           contextBlock(input, true),
           `Agreed plan:\n${JSON.stringify(input.plan, null, 2)}`,
+          written && `Files written so far in this run:\n${written}`,
+          pending && `Still to be written after this one:\n${pending}`,
           `User request (${input.kind}):\n${input.prompt}`,
-        ].join("\n\n"),
+          `Write this file now: ${input.path}\nIts role: ${input.intent}`,
+        ]
+          .filter(Boolean)
+          .join("\n\n"),
       },
     ];
 
@@ -310,7 +317,9 @@ export class DeepSeekGameProvider implements GameGenerationProvider {
       messages.push(
         {
           role: "assistant",
-          content: JSON.stringify({ files: input.repair.attemptedFiles }),
+          content: JSON.stringify({
+            files: [{ path: input.path, content: input.repair.attempted }],
+          }),
         },
         {
           role: "user",
@@ -319,8 +328,8 @@ export class DeepSeekGameProvider implements GameGenerationProvider {
       );
     }
 
-    // Writing a whole game is where reasoning can pay for itself — and also
-    // where it costs the most time, against a fixed serverless wall clock.
+    // One file per call, so the reasoning budget is spent on a focused task
+    // rather than on holding an entire game in mind at once.
     const { content, usage } = await callDeepSeek(messages, {
       temperature: input.kind === "edit" ? 0.2 : 0.6,
       model: env.DEEPSEEK_MODEL,
@@ -329,35 +338,28 @@ export class DeepSeekGameProvider implements GameGenerationProvider {
       timeoutMs: input.timeoutMs,
     });
 
-    const generated = buildResponseSchema.parse(
+    const generated = writeResponseSchema.parse(
       JSON.parse(stripCodeFence(content)) as unknown,
     );
 
-    // The model is told not to touch platform-owned files but occasionally
-    // echoes them back. Drop those instead of failing the whole edit;
-    // validateAgentFiles still enforces the boundary as a hard backstop.
-    const changed = validateAgentFiles(
-      generated.files.filter((file) => {
-        const parsed = generatedFileSchema.safeParse(file);
-        return (
-          parsed.success &&
-          isEditableAgentPath(parsed.data.path) &&
-          // SPEC.md is rendered by the platform from the plan, never by the model.
-          parsed.data.path !== SPEC_PATH
-        );
-      }),
-    ) as AgentFile[];
+    // The model was asked for one specific path. Take that one if present and
+    // ignore anything else it decided to include.
+    const candidates = generated.files
+      .map((file) => generatedFileSchema.safeParse(file))
+      .flatMap((parsed) => (parsed.success ? [parsed.data] : []));
+    const chosen =
+      candidates.find((file) => file.path === input.path) ?? candidates[0];
+    if (!chosen) {
+      throw new Error(`模型没有返回 ${input.path} 的内容`);
+    }
 
-    const merged = mergeAgentFiles(previousAgentFiles, changed, generated.deleted);
-    const workspace = createGameWorkspace({
-      title: generated.title,
-      summary: generated.summary,
-      agentFiles: merged,
-    });
+    // The requested path is authoritative: the plan decided it, not the model.
+    const [file] = validateAgentFiles([
+      { path: input.path, content: chosen.content },
+    ]) as AgentFile[];
 
     return {
-      workspace,
-      changedPaths: changed.map((file) => file.path),
+      file,
       provider: "deepseek" as const,
       model: env.DEEPSEEK_MODEL,
       usage: {
@@ -365,7 +367,7 @@ export class DeepSeekGameProvider implements GameGenerationProvider {
         outputTokens: usage.completion_tokens,
         // Conservative flat reservation until provider billing metadata is
         // available. This keeps the public budget from under-counting.
-        estimatedCostUsd: 0.05,
+        estimatedCostUsd: 0.02,
       },
     };
   }

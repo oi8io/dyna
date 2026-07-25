@@ -1,13 +1,11 @@
 import type { StreamDelta } from "@/lib/generation-events";
 import type {
-  BuildInput,
   GameGenerationProvider,
-  GenerateGameResult,
   PlanInput,
   PlanResult,
+  WriteFileInput,
+  WriteFileResult,
 } from "@/server/llm/types";
-import { createGameWorkspace } from "@/server/template/game-template";
-import { isEditableAgentPath } from "@/server/workspace/schema";
 
 /** Roughly a fast model's output rate, so demo mode feels like the real thing. */
 const REPLAY_CHARS_PER_TICK = 220;
@@ -19,22 +17,20 @@ const REPLAY_TICK_MS = 22;
  * UI path as live mode. This is a simulation, not real progress; the builder
  * labels the run as `Fake demo` so nobody mistakes it for a model call.
  */
-async function replayWorkspace(
-  files: Array<{ path: string; content: string }>,
+async function replayFile(
+  file: { path: string; content: string },
   onProgress: (delta: StreamDelta) => void,
 ) {
-  for (const file of files) {
-    onProgress({ type: "file-open", path: file.path });
-    for (let at = 0; at < file.content.length; at += REPLAY_CHARS_PER_TICK) {
-      onProgress({
-        type: "file-delta",
-        path: file.path,
-        text: file.content.slice(at, at + REPLAY_CHARS_PER_TICK),
-      });
-      await new Promise((resolve) => setTimeout(resolve, REPLAY_TICK_MS));
-    }
-    onProgress({ type: "file-close", path: file.path });
+  onProgress({ type: "file-open", path: file.path });
+  for (let at = 0; at < file.content.length; at += REPLAY_CHARS_PER_TICK) {
+    onProgress({
+      type: "file-delta",
+      path: file.path,
+      text: file.content.slice(at, at + REPLAY_CHARS_PER_TICK),
+    });
+    await new Promise((resolve) => setTimeout(resolve, REPLAY_TICK_MS));
   }
+  onProgress({ type: "file-close", path: file.path });
 }
 
 function safeJson(value: string) {
@@ -46,7 +42,7 @@ function titleFromPrompt(prompt: string) {
   return concise || "Neon Breaker";
 }
 
-function createArtifact(input: Pick<BuildInput, "kind" | "prompt">) {
+function createArtifact(input: Pick<PlanInput, "kind" | "prompt">) {
   const title = titleFromPrompt(input.prompt);
   const prompt = safeJson(input.prompt);
   const editNote =
@@ -105,9 +101,14 @@ export class FakeGameProvider implements GameGenerationProvider {
           input.kind === "edit"
             ? `在现有作品上应用：${input.prompt}`
             : `新建一个作品：${input.prompt}`,
+        title: titleFromPrompt(input.prompt),
+        // Ordered so later files can rely on earlier ones, matching what the
+        // real planner is asked to produce.
         changes: [
-          { path: "src/App.tsx", intent: "渲染游戏外壳与状态显示" },
           { path: "src/game/engine.ts", intent: "实现核心玩法循环" },
+          { path: "src/App.tsx", intent: "渲染游戏外壳与状态显示" },
+          { path: "src/styles.css", intent: "布局与视觉样式" },
+          { path: "README.md", intent: "说明玩法与操作" },
         ],
         assumptions: ["Fake 模式返回固定示例工程，不反映真实需求理解。"],
         questions: [],
@@ -132,18 +133,32 @@ export class FakeGameProvider implements GameGenerationProvider {
     };
   }
 
-  async generate(input: BuildInput): Promise<GenerateGameResult> {
-    const artifact = createArtifact(input);
+  prebuiltArtifactHtml(input: PlanInput) {
+    return createArtifact(input);
+  }
+
+  async writeFile(input: WriteFileInput): Promise<WriteFileResult> {
     const title = titleFromPrompt(input.prompt);
-    const summary =
-      input.kind === "edit"
-        ? "已应用修改并生成新的可玩版本。"
-        : "已生成一款带计分、生命值和重开机制的霓虹打砖块游戏。";
-    const workspace = createGameWorkspace({
-      title,
-      summary,
-      agentFiles: [
-        {
+    const fixture = fakeAgentFiles(title, input.prompt);
+    const file = fixture.find((entry) => entry.path === input.path) ?? {
+      path: input.path,
+      content: `// ${input.path}\n// ${input.intent}\n`,
+    };
+
+    if (input.onProgress) await replayFile(file, input.onProgress);
+
+    return {
+      file,
+      provider: "fake" as const,
+      model: "deterministic-game-fixture-v1",
+      usage: { inputTokens: 0, outputTokens: 0, estimatedCostUsd: 0 },
+    };
+  }
+}
+
+function fakeAgentFiles(title: string, prompt: string) {
+  return [
+    {
           path: "src/App.tsx",
           content: `import { useEffect, useRef, useState } from "react";
 import { BreakoutEngine } from "./game/engine";
@@ -221,31 +236,9 @@ export class BreakoutEngine {
           path: "src/styles.css",
           content: `*{box-sizing:border-box}html,body,#root{height:100%;margin:0}body{display:grid;place-items:center;background:radial-gradient(circle at 50% 0,#172554,#030712 58%);color:#e0f2fe;font:14px system-ui}.game-shell{width:min(94vw,820px)}header,footer{display:flex;align-items:center;justify-content:space-between;gap:16px}header span{color:#67e8f9;font-size:11px;letter-spacing:.18em;text-transform:uppercase}h1{margin:5px 0 12px}.stats{display:flex;gap:10px}.stats b,button{border:1px solid #ffffff22;border-radius:999px;padding:8px 12px;background:#ffffff0b;color:inherit}canvas{display:block;width:100%;border:1px solid #67e8f944;border-radius:22px;background:#020617;box-shadow:0 28px 80px #0009}footer{margin-top:10px;color:#64748b}button{cursor:pointer}`,
         },
-        {
-          path: "README.md",
-          content: `# ${title}\n\nPrompt: ${input.prompt}\n\nReact + TypeScript 多文件游戏工程。`,
-        },
-      ],
-    });
-
-    const changedPaths = workspace.files
-      .filter((file) => isEditableAgentPath(file.path))
-      .map((file) => file.path);
-
-    if (input.onProgress) {
-      await replayWorkspace(
-        workspace.files.filter((file) => changedPaths.includes(file.path)),
-        input.onProgress,
-      );
-    }
-
-    return {
-      workspace,
-      changedPaths,
-      prebuiltArtifactHtml: artifact,
-      provider: "fake" as const,
-      model: "deterministic-game-fixture-v1",
-      usage: { inputTokens: 0, outputTokens: 0, estimatedCostUsd: 0 },
-    };
-  }
+    {
+      path: "README.md",
+      content: `# ${title}\n\nPrompt: ${prompt}\n\nReact + TypeScript 多文件游戏工程。`,
+    },
+  ];
 }

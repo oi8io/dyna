@@ -17,6 +17,8 @@ export const clarifyingQuestionSchema = z.object({
  */
 export const generationPlanSchema = z.object({
   understanding: z.string().min(1).max(800),
+  /** Names the work. Decided at plan time so no extra call is needed later. */
+  title: z.string().min(1).max(120).catch("未命名作品"),
   changes: z
     .array(
       z.object({

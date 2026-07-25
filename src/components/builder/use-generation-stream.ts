@@ -68,6 +68,16 @@ export function useGenerationStream() {
             questions: event.questions,
             activePath: undefined,
           };
+        case "job":
+          // Show the whole plan up front so the file list does not appear one
+          // entry at a time as each step starts.
+          return {
+            ...current,
+            order: event.files,
+            drafts: Object.fromEntries(event.files.map((path) => [path, ""])),
+          };
+        case "step-done":
+          return { ...current, activePath: undefined, thinkingChars: 0 };
         case "thinking":
           return { ...current, thinkingChars: event.chars };
         case "file-open":

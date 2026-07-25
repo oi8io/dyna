@@ -2,14 +2,18 @@ import { transform } from "esbuild";
 import { describe, expect, it } from "vitest";
 
 import { validateStandaloneHtml } from "@/server/build/validation";
-import { buildInputFixture } from "@/server/llm/test-fixtures";
+import {
+  fakeWorkspaceFixture,
+  planInputFixture,
+  writeInputFixture,
+} from "@/server/llm/test-fixtures";
 import { FakeGameProvider } from "./fake-provider";
 
 describe("FakeGameProvider", () => {
-  it("returns compilable engineering source and a playable artifact", async () => {
-    const result = await new FakeGameProvider().generate(buildInputFixture());
+  it("assembles compilable source across one call per planned file", async () => {
+    const { workspace, prebuiltArtifactHtml } = await fakeWorkspaceFixture();
 
-    const paths = result.workspace.files.map((file) => file.path);
+    const paths = workspace.files.map((file) => file.path);
     expect(paths).toEqual(
       expect.arrayContaining([
         "package.json",
@@ -21,7 +25,7 @@ describe("FakeGameProvider", () => {
       ]),
     );
 
-    for (const file of result.workspace.files) {
+    for (const file of workspace.files) {
       if (file.path.endsWith(".tsx")) {
         await expect(
           transform(file.content, { loader: "tsx", jsx: "automatic" }),
@@ -34,12 +38,31 @@ describe("FakeGameProvider", () => {
       }
     }
 
-    expect(result.prebuiltArtifactHtml).toBeTruthy();
-    expect(result.prebuiltArtifactHtml).toContain(
-      ".overlay[hidden]{display:none}",
-    );
+    expect(prebuiltArtifactHtml).toBeTruthy();
+    expect(prebuiltArtifactHtml).toContain(".overlay[hidden]{display:none}");
     expect(() =>
-      validateStandaloneHtml(result.prebuiltArtifactHtml ?? ""),
+      validateStandaloneHtml(prebuiltArtifactHtml ?? ""),
     ).not.toThrow();
+  });
+
+  it("returns only the file it was asked for", async () => {
+    const { file } = await new FakeGameProvider().writeFile(
+      writeInputFixture({ path: "src/game/engine.ts", intent: "玩法循环" }),
+    );
+    expect(file.path).toBe("src/game/engine.ts");
+    expect(file.content).toContain("BreakoutEngine");
+  });
+
+  it("plans files in dependency order so later ones can rely on earlier", async () => {
+    const { plan } = await new FakeGameProvider().plan(planInputFixture());
+    const paths = plan.changes.map((change) => change.path);
+    expect(paths.indexOf("src/game/engine.ts")).toBeLessThan(
+      paths.indexOf("src/App.tsx"),
+    );
+  });
+
+  it("never asks a question, because the fixture is fully determined", async () => {
+    const { plan } = await new FakeGameProvider().plan(planInputFixture());
+    expect(plan.questions).toEqual([]);
   });
 });

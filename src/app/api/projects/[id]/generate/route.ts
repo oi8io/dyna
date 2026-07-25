@@ -7,7 +7,7 @@ import { createClient } from "@/lib/supabase/server";
 import { buildGeneratedWorkspace } from "@/server/build";
 import { getServerEnv, isLiveGenerationReady } from "@/server/env";
 import { getGameGenerationProvider } from "@/server/llm";
-import { planNeedsClarification } from "@/server/llm/plan";
+import { generationPlanSchema, planNeedsClarification } from "@/server/llm/plan";
 import {
   SPEC_PATH,
   appendChangelog,
@@ -15,59 +15,51 @@ import {
   readSpecMarkdown,
   renderSpecMarkdown,
 } from "@/server/llm/spec";
-import type { ConversationTurn } from "@/server/llm/types";
+import type { ConversationTurn, PlanInput } from "@/server/llm/types";
+import { createGameWorkspace } from "@/server/template/game-template";
 import type { AgentFile, GeneratedWorkspace } from "@/server/workspace/schema";
-import { redactBuildLog, validateWorkspace } from "@/server/workspace/schema";
+import {
+  extractAgentFiles,
+  isEditableAgentPath,
+  mergeAgentFiles,
+  redactBuildLog,
+  validateWorkspace,
+} from "@/server/workspace/schema";
 
 // The response is a long-lived stream; it must never be cached or prerendered.
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
-/** How much conversation to replay. Enough for context, bounded for cost. */
-const HISTORY_TURNS = 12;
-
 /**
- * Wall clock this handler gives itself, under the platform's `maxDuration`.
+ * A generation runs as several short requests rather than one long one.
  *
- * Being killed by the platform is not a graceful failure: the `finally` block
- * never runs, so `finalize_generation` never releases the reserved budget and
- * the job stays `running` forever. Finishing early on our own terms — with a
- * real error event and a settled job — is strictly better than being cut off.
+ * Doing it in a single invocation put the whole run under the platform's
+ * per-request wall clock, and made the model emit an entire game in one answer
+ * — which is both the slowest and the lowest-quality way to ask for it. Each
+ * phase below is its own request with the full budget available to it.
  */
+const HISTORY_TURNS = 12;
 const DEADLINE_MS = (maxDuration - 20) * 1000;
-
-/**
- * Planning emits a few hundred tokens of JSON. If it cannot manage that inside
- * a minute the request is not going to finish anyway, and every second spent
- * here is one the code-writing stage does not get.
- */
 const PLAN_MAX_MS = 60_000;
-/** Time the build and persistence steps still need after the last model call. */
-const BUILD_RESERVE_MS = 100_000;
-/** Below this, a repair pass cannot finish, so it is not started. */
+/** Left for persisting and, in the finish phase, for the sandbox build. */
+const TAIL_RESERVE_MS = 100_000;
 const REPAIR_MIN_MS = 70_000;
 
-/**
- * Names the stage that ran out of time.
- *
- * An `AbortError` on its own says "This operation was aborted" and nothing
- * else — not which of the two or three model calls it was, which is the only
- * part worth knowing when deciding what to change.
- */
-function labelStage(error: unknown, stage: string): unknown {
-  const message = error instanceof Error ? error.message : String(error);
-  if (/abort/i.test(message)) {
-    return new Error(`${stage}_timed_out: ${message}`);
-  }
-  return error;
-}
-
 const paramsSchema = z.object({ id: z.uuid() });
-const generateSchema = z.object({
-  prompt: z.string().trim().min(3).max(4000),
-  kind: z.enum(["create", "edit"]).default("edit"),
-  idempotencyKey: z.string().min(8).max(120),
-});
+const bodySchema = z.discriminatedUnion("phase", [
+  z.object({
+    phase: z.literal("plan"),
+    prompt: z.string().trim().min(3).max(4000),
+    kind: z.enum(["create", "edit"]).default("edit"),
+    idempotencyKey: z.string().min(8).max(120),
+  }),
+  z.object({
+    phase: z.literal("file"),
+    jobId: z.uuid(),
+    path: z.string().min(1).max(240),
+  }),
+  z.object({ phase: z.literal("finish"), jobId: z.uuid() }),
+]);
 
 function readableGenerationError(error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
@@ -82,19 +74,12 @@ function readableGenerationError(error: unknown) {
   if (message.includes("duplicate key")) return "已有生成任务正在进行。";
   if (message.includes("snapshot_unreadable"))
     return "上一个版本的源码快照损坏，无法在其基础上修改。";
-  if (message.includes("plan_timed_out")) {
-    return "理解需求这一步超时了。模型响应偏慢，稍后再试一次通常就好。";
-  }
-  if (message.includes("write_timed_out") || message.includes("repair_timed_out")) {
-    return "写代码这一步超时了。把改动拆小一点分几次说，通常就能过。";
-  }
-  if (
-    message.includes("generation_deadline_exceeded") ||
-    message.includes("aborted") ||
-    message.includes("AbortError")
-  ) {
-    return "这次生成超时了。换一个更小的改动分几次说，通常就能过。";
-  }
+  if (message.includes("job_not_found"))
+    return "这次生成的任务已经结束，请重新开始。";
+  if (message.includes("plan_timed_out"))
+    return "理解需求这一步超时了。稍后再试一次通常就好。";
+  if (/timed_out|aborted|AbortError|deadline/i.test(message))
+    return "这一步超时了。稍后重试，已经写好的文件会保留。";
   return "生成失败，请稍后重试。";
 }
 
@@ -103,12 +88,20 @@ function generationErrorDetail(error: unknown) {
   return redactBuildLog(message || "unknown_generation_error").slice(0, 800);
 }
 
+function labelStage(error: unknown, stage: string): unknown {
+  const message = error instanceof Error ? error.message : String(error);
+  if (/abort/i.test(message)) {
+    return new Error(`${stage}_timed_out: ${message}`);
+  }
+  return error;
+}
+
 export async function POST(
   request: Request,
   context: { params: Promise<{ id: string }> },
 ) {
   const params = paramsSchema.safeParse(await context.params);
-  const body = generateSchema.safeParse(await request.json());
+  const body = bodySchema.safeParse(await request.json());
   if (!params.success || !body.success) {
     return NextResponse.json({ error: "请求参数无效。" }, { status: 400 });
   }
@@ -121,17 +114,18 @@ export async function POST(
     return NextResponse.json({ error: "请先登录。" }, { status: 401 });
   }
 
-  const { data: project } = await supabase
+  const { data: projectRow } = await supabase
     .from("projects")
     .select("id, user_id, original_prompt, current_version_id")
     .eq("id", params.data.id)
     .single();
-  if (!project || project.user_id !== user.id) {
+  if (!projectRow || projectRow.user_id !== user.id) {
     return NextResponse.json({ error: "项目不存在。" }, { status: 404 });
   }
 
-  // Everything above can still fail with a normal status code. Once the stream
-  // opens the status is already 200, so later failures travel as `error` events.
+  // Bound outside the stream closure so its non-null narrowing survives.
+  const project = projectRow;
+  const phase = body.data;
   const encoder = new TextEncoder();
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
@@ -140,15 +134,12 @@ export async function POST(
         if (closed) return;
         controller.enqueue(encoder.encode(encodeSseFrame(event)));
       };
-
       const startedAt = Date.now();
       const remainingMs = () => DEADLINE_MS - (Date.now() - startedAt);
 
-      const live = isLiveGenerationReady();
       const env = getServerEnv();
       let jobId: string | undefined;
       let settled = false;
-
       const settle = async (
         status: "succeeded" | "failed" | "cancelled",
         usage: { costUsd: number; inputTokens: number; outputTokens: number },
@@ -170,10 +161,10 @@ export async function POST(
         });
       };
 
-      try {
+      /** Rebuilds the context every phase needs from the project's own state. */
+      async function loadContext(kind: "create" | "edit", prompt: string) {
         let previousWorkspace: GeneratedWorkspace | undefined;
         let versionNumber = 1;
-
         if (project.current_version_id) {
           const { data: previous } = await supabase
             .from("project_versions")
@@ -182,14 +173,9 @@ export async function POST(
             .single();
           if (previous) {
             versionNumber = previous.version_number + 1;
-            // A snapshot that will not validate used to be swallowed and the
-            // request continued with no previous project attached, at which
-            // point the agent had no choice but to invent a brand new game on
-            // top of the user's existing one. Fail loudly instead.
             previousWorkspace = validateWorkspace(previous.source_snapshot);
           }
         }
-
         const { data: historyRows } = await supabase
           .from("messages")
           .select("role, content")
@@ -201,172 +187,206 @@ export async function POST(
           .slice()
           .reverse();
 
-        const specMarkdown = readSpecMarkdown(previousWorkspace);
-        const provider = getGameGenerationProvider();
-        const planInput = {
-          kind: body.data.kind,
-          prompt: body.data.prompt,
+        const input: PlanInput = {
+          kind,
+          prompt,
           originalPrompt: project.original_prompt,
-          specMarkdown,
+          specMarkdown: readSpecMarkdown(previousWorkspace),
           history,
           previousWorkspace,
         };
+        return { input, versionNumber, previousWorkspace };
+      }
 
-        if (live) {
-          send({ type: "phase", phase: "reserving", message: "正在确认额度" });
-          const { data: job, error: reserveError } = await supabase.rpc(
-            "reserve_generation",
-            {
-              p_project_id: project.id,
-              p_kind: body.data.kind,
-              p_idempotency_key: body.data.idempotencyKey,
-              p_reserved_usd: 0.05,
-            },
-          );
-          if (reserveError) throw reserveError;
-          jobId = job?.id;
-        }
+      try {
+        const provider = getGameGenerationProvider();
 
-        await Promise.all([
-          supabase
-            .from("projects")
-            .update({ status: "generating" })
-            .eq("id", project.id),
-          supabase.from("messages").insert({
-            project_id: project.id,
-            role: "user",
-            content: body.data.prompt,
-            metadata: { kind: body.data.kind },
-          }),
-        ]);
+        // ---- Phase one: understand the request, or ask about it ------------
+        if (phase.phase === "plan") {
+          const { input } = await loadContext(phase.kind, phase.prompt);
 
-        // Stage one: decide what to do, or ask.
-        send({ type: "phase", phase: "planning", message: "正在理解需求" });
-        const { plan, ...planMeta } = await provider
-          .plan({
-            ...planInput,
-            timeoutMs: Math.min(
-              PLAN_MAX_MS,
-              remainingMs() - BUILD_RESERVE_MS,
-            ),
-          })
-          .catch((error: unknown) => {
-            throw labelStage(error, "plan");
-          });
+          if (isLiveGenerationReady()) {
+            send({ type: "phase", phase: "reserving", message: "正在确认额度" });
+            const { data: job, error: reserveError } = await supabase.rpc(
+              "reserve_generation",
+              {
+                p_project_id: project.id,
+                p_kind: phase.kind,
+                p_idempotency_key: phase.idempotencyKey,
+                p_reserved_usd: 0.05,
+              },
+            );
+            if (reserveError) throw reserveError;
+            jobId = job?.id;
+          }
 
-        if (planNeedsClarification(plan)) {
-          // Nothing was built, so nothing is charged. The reservation is
-          // released and the questions are stored as a normal assistant turn so
-          // the next request sees them in the history.
-          await settle(
-            "cancelled",
-            {
-              costUsd: 0,
-              inputTokens: planMeta.usage.inputTokens,
-              outputTokens: planMeta.usage.outputTokens,
-            },
-            planMeta.provider,
-            planMeta.model,
-            "needs_clarification",
-          );
           await Promise.all([
             supabase
               .from("projects")
-              .update({
-                status: project.current_version_id ? "ready" : "draft",
-              })
+              .update({ status: "generating" })
               .eq("id", project.id),
             supabase.from("messages").insert({
               project_id: project.id,
-              role: "assistant",
-              content: [
-                plan.understanding,
-                ...plan.questions.map(
-                  (item) => `· ${item.question}（${item.options.join(" / ")}）`,
-                ),
-              ].join("\n"),
-              metadata: { questions: plan.questions, provider: planMeta.provider },
+              role: "user",
+              content: phase.prompt,
+              metadata: { kind: phase.kind },
             }),
           ]);
+
+          send({ type: "phase", phase: "planning", message: "正在理解需求" });
+          const { plan, ...meta } = await provider
+            .plan({
+              ...input,
+              timeoutMs: Math.min(PLAN_MAX_MS, remainingMs() - TAIL_RESERVE_MS),
+            })
+            .catch((error: unknown) => {
+              throw labelStage(error, "plan");
+            });
+
+          if (planNeedsClarification(plan)) {
+            await settle(
+              "cancelled",
+              {
+                costUsd: 0,
+                inputTokens: meta.usage.inputTokens,
+                outputTokens: meta.usage.outputTokens,
+              },
+              meta.provider,
+              meta.model,
+              "needs_clarification",
+            );
+            await Promise.all([
+              supabase
+                .from("projects")
+                .update({
+                  status: project.current_version_id ? "ready" : "draft",
+                })
+                .eq("id", project.id),
+              supabase.from("messages").insert({
+                project_id: project.id,
+                role: "assistant",
+                content: [
+                  plan.understanding,
+                  ...plan.questions.map(
+                    (item) => `· ${item.question}（${item.options.join(" / ")}）`,
+                  ),
+                ].join("\n"),
+                metadata: { questions: plan.questions, provider: meta.provider },
+              }),
+            ]);
+            send({
+              type: "question",
+              understanding: plan.understanding,
+              questions: plan.questions,
+            });
+            return;
+          }
+
+          if (!plan.changes.length) {
+            throw new Error("计划没有指出要改哪些文件。");
+          }
+
+          if (jobId) {
+            await supabase.rpc("save_generation_plan", {
+              p_job_id: jobId,
+              p_plan: { ...plan, prompt: phase.prompt, kind: phase.kind },
+            });
+          }
+
           send({
-            type: "question",
+            type: "plan",
             understanding: plan.understanding,
-            questions: plan.questions,
+            changes: plan.changes,
+            assumptions: plan.assumptions,
+          });
+          // Demo mode has no job row, so the client gets a synthetic id and the
+          // subsequent phases fall back to re-planning from the same prompt.
+          send({
+            type: "job",
+            jobId: jobId ?? "demo",
+            files: plan.changes.map((change) => change.path),
           });
           return;
         }
 
-        send({
-          type: "plan",
-          understanding: plan.understanding,
-          changes: plan.changes,
-          assumptions: plan.assumptions,
-        });
+        // ---- Later phases: reload the agreed plan --------------------------
+        const { data: jobRow } = await supabase
+          .from("generation_jobs")
+          .select("id, kind, plan, draft_files, status")
+          .eq("id", phase.jobId)
+          .maybeSingle();
+        if (!jobRow || jobRow.status !== "running") {
+          throw new Error("job_not_found");
+        }
+        jobId = jobRow.id as string;
 
-        // Stage two: implement the agreed plan.
-        send({ type: "phase", phase: "writing", message: "正在写代码" });
-        let result = await provider
-          .generate({
-            ...planInput,
-            plan,
-            onProgress: send,
-            timeoutMs: remainingMs() - BUILD_RESERVE_MS,
-          })
-          .catch((error: unknown) => {
-            throw labelStage(error, "write");
-          });
+        const stored = (jobRow.plan ?? {}) as Record<string, unknown>;
+        const plan = generationPlanSchema.parse(stored);
+        const storedPrompt =
+          typeof stored.prompt === "string" ? stored.prompt : plan.understanding;
+        const kind = (jobRow.kind as "create" | "edit") ?? "edit";
+        const drafts = (jobRow.draft_files ?? {}) as Record<string, string>;
+        const { input, versionNumber, previousWorkspace } = await loadContext(
+          kind,
+          storedPrompt,
+        );
 
-        send({ type: "phase", phase: "building", message: "正在隔离构建" });
-        let build;
-        try {
-          build = await buildGeneratedWorkspace(
-            result.workspace,
-            result.prebuiltArtifactHtml,
+        // ---- Phase two: write exactly one file -----------------------------
+        if (phase.phase === "file") {
+          const change = plan.changes.find(
+            (entry) => entry.path === phase.path,
           );
-        } catch (buildError) {
-          const detail = generationErrorDetail(buildError);
-          send({ type: "log", level: "error", message: detail });
-
-          // One repair pass. The model has never seen its own compiler errors
-          // before; showing them converts most failures into successes. Started
-          // only when there is time to finish it — a repair cut off by the
-          // platform loses the reservation as well as the attempt.
-          if (remainingMs() < REPAIR_MIN_MS) {
-            throw buildError;
+          if (!change || !isEditableAgentPath(change.path)) {
+            throw new Error(`计划里没有这个文件：${phase.path}`);
           }
+
           send({
             type: "phase",
-            phase: "repairing",
-            message: "构建失败，正在修复",
+            phase: "writing",
+            message: `正在写 ${change.path}`,
           });
-          const attemptedFiles = result.workspace.files.filter((file) =>
-            result.changedPaths.includes(file.path),
-          ) as AgentFile[];
-          result = await provider
-            .generate({
-              ...planInput,
+          const written = await provider
+            .writeFile({
+              ...input,
               plan,
+              path: change.path,
+              intent: change.intent,
+              drafts,
               onProgress: send,
-              repair: { attemptedFiles, error: detail },
-              timeoutMs: remainingMs() - BUILD_RESERVE_MS,
+              timeoutMs: remainingMs() - TAIL_RESERVE_MS,
             })
-            .catch((cause: unknown) => {
-              throw labelStage(cause, "repair");
+            .catch((error: unknown) => {
+              throw labelStage(error, "write");
             });
-          build = await buildGeneratedWorkspace(
-            result.workspace,
-            result.prebuiltArtifactHtml,
-          );
+
+          await supabase.rpc("save_generation_draft", {
+            p_job_id: jobId,
+            p_path: written.file.path,
+            p_content: written.file.content,
+          });
+
+          const done = new Set([...Object.keys(drafts), written.file.path]);
+          const next = plan.changes.find((entry) => !done.has(entry.path));
+          send({
+            type: "step-done",
+            path: written.file.path,
+            nextPath: next?.path,
+          });
+          return;
         }
 
-        for (const entry of build.logs) {
-          send({ type: "log", level: entry.level, message: entry.message });
+        // ---- Phase three: assemble, build, persist -------------------------
+        const changed = plan.changes
+          .filter((entry) => typeof drafts[entry.path] === "string")
+          .map((entry) => ({ path: entry.path, content: drafts[entry.path] }));
+        if (!changed.length) {
+          throw new Error("没有任何已写好的文件可以构建。");
         }
 
-        // The platform renders SPEC.md from the plan rather than letting the
-        // model write it: the shape stays stable and the changelog accumulates.
-        // When the plan came back without a spec, the previous one is carried
-        // forward untouched rather than being dropped.
+        const previousAgentFiles = previousWorkspace
+          ? extractAgentFiles(previousWorkspace)
+          : [];
+        const specMarkdown = input.specMarkdown;
         const specContent = plan.spec
           ? renderSpecMarkdown(
               plan.spec,
@@ -376,15 +396,78 @@ export async function POST(
               ),
             )
           : specMarkdown;
-        const workspace: GeneratedWorkspace = {
-          ...result.workspace,
-          files: [
-            ...result.workspace.files.filter((file) => file.path !== SPEC_PATH),
-            ...(specContent
-              ? [{ path: SPEC_PATH, content: specContent }]
-              : []),
-          ],
+
+        const assemble = (files: AgentFile[]) => {
+          const merged = mergeAgentFiles(previousAgentFiles, files);
+          const workspace = createGameWorkspace({
+            title: plan.title,
+            summary: plan.changeSummary,
+            agentFiles: merged,
+          });
+          return {
+            ...workspace,
+            files: [
+              ...workspace.files.filter((file) => file.path !== SPEC_PATH),
+              ...(specContent
+                ? [{ path: SPEC_PATH, content: specContent }]
+                : []),
+            ],
+          } satisfies GeneratedWorkspace;
         };
+
+        let workspace = assemble(changed as AgentFile[]);
+        const prebuilt = provider.prebuiltArtifactHtml?.(input);
+
+        send({ type: "phase", phase: "building", message: "正在隔离构建" });
+        let build;
+        try {
+          build = await buildGeneratedWorkspace(workspace, prebuilt);
+        } catch (buildError) {
+          const detail = generationErrorDetail(buildError);
+          send({ type: "log", level: "error", message: detail });
+          if (remainingMs() < REPAIR_MIN_MS) throw buildError;
+
+          // Repair the single most likely culprit rather than everything: the
+          // last file written is where a compile error almost always lives.
+          const target = changed.at(-1);
+          if (!target) throw buildError;
+          send({
+            type: "phase",
+            phase: "repairing",
+            message: `构建失败，正在修复 ${target.path}`,
+          });
+          const fixed = await provider
+            .writeFile({
+              ...input,
+              plan,
+              path: target.path,
+              intent:
+                plan.changes.find((entry) => entry.path === target.path)
+                  ?.intent ?? "",
+              drafts,
+              onProgress: send,
+              timeoutMs: remainingMs() - TAIL_RESERVE_MS,
+              repair: { attempted: target.content, error: detail },
+            })
+            .catch((error: unknown) => {
+              throw labelStage(error, "repair");
+            });
+          await supabase.rpc("save_generation_draft", {
+            p_job_id: jobId,
+            p_path: fixed.file.path,
+            p_content: fixed.file.content,
+          });
+          workspace = assemble(
+            changed.map((file) =>
+              file.path === fixed.file.path ? fixed.file : file,
+            ) as AgentFile[],
+          );
+          build = await buildGeneratedWorkspace(workspace, prebuilt);
+        }
+
+        for (const entry of build.logs) {
+          send({ type: "log", level: entry.level, message: entry.message });
+        }
 
         send({ type: "phase", phase: "saving", message: "正在保存版本" });
         const { data: version, error: versionError } = await supabase
@@ -396,10 +479,7 @@ export async function POST(
             source_snapshot: workspace,
             artifact_html: build.artifactHtml,
             build_log: [
-              {
-                level: "info",
-                message: `${result.provider} 生成完成；隔离校验通过。`,
-              },
+              { level: "info", message: "分步生成完成；隔离校验通过。" },
               ...build.logs,
             ],
           })
@@ -409,14 +489,16 @@ export async function POST(
           throw versionError ?? new Error("No version");
         }
 
-        const fileRows = workspace.files.map((file) => ({
-          project_id: project.id,
-          path: file.path,
-          content: file.content,
-        }));
         const { error: filesError } = await supabase
           .from("project_files")
-          .upsert(fileRows, { onConflict: "project_id,path" });
+          .upsert(
+            workspace.files.map((file) => ({
+              project_id: project.id,
+              path: file.path,
+              content: file.content,
+            })),
+            { onConflict: "project_id,path" },
+          );
         if (filesError) throw filesError;
 
         await Promise.all([
@@ -434,9 +516,7 @@ export async function POST(
             content: workspace.summary,
             metadata: {
               versionId: version.id,
-              provider: result.provider,
-              model: result.model,
-              changedPaths: result.changedPaths,
+              changedPaths: changed.map((file) => file.path),
               assumptions: plan.assumptions,
             },
           }),
@@ -444,59 +524,45 @@ export async function POST(
 
         await settle(
           "succeeded",
-          {
-            costUsd: result.usage.estimatedCostUsd + planMeta.usage.estimatedCostUsd,
-            inputTokens:
-              result.usage.inputTokens + planMeta.usage.inputTokens,
-            outputTokens:
-              result.usage.outputTokens + planMeta.usage.outputTokens,
-          },
-          result.provider,
-          result.model,
+          { costUsd: 0.05, inputTokens: 0, outputTokens: 0 },
+          "deepseek",
+          env.DEEPSEEK_MODEL,
           null,
         );
-
-        send({ type: "done", versionNumber, provider: result.provider });
+        send({ type: "done", versionNumber, provider: "deepseek" });
       } catch (error) {
         const errorDetail = generationErrorDetail(error);
         console.error("[generation_failed]", {
           projectId: project.id,
-          kind: body.data.kind,
+          phase: phase.phase,
           error: errorDetail,
         });
-        await Promise.all([
-          supabase
-            .from("projects")
-            .update({
-              status: project.current_version_id ? "ready" : "failed",
-            })
-            .eq("id", project.id),
-          supabase.from("messages").insert({
-            project_id: project.id,
-            role: "assistant",
-            content: readableGenerationError(error),
-            metadata: {
-              error: true,
-              kind: body.data.kind,
-              // Stored in production too. It has already been through
-              // `redactBuildLog`, and without it a failure on a deployment is
-              // undiagnosable from the UI — the cause only exists in a platform
-              // log the person who hit the error usually cannot read.
-              detail: errorDetail,
-            },
-          }),
-        ]);
-        await settle(
-          "failed",
-          { costUsd: 0, inputTokens: 0, outputTokens: 0 },
-          "deepseek",
-          env.DEEPSEEK_MODEL,
-          "generation_failed",
-        );
-        send({
-          type: "error",
-          message: readableGenerationError(error),
-        });
+        // A failed step keeps the job alive so the finished files survive and
+        // the user can retry just that step. Only a terminal phase settles.
+        if (phase.phase !== "file") {
+          await Promise.all([
+            supabase
+              .from("projects")
+              .update({
+                status: project.current_version_id ? "ready" : "failed",
+              })
+              .eq("id", project.id),
+            supabase.from("messages").insert({
+              project_id: project.id,
+              role: "assistant",
+              content: readableGenerationError(error),
+              metadata: { error: true, phase: phase.phase, detail: errorDetail },
+            }),
+          ]);
+          await settle(
+            "failed",
+            { costUsd: 0, inputTokens: 0, outputTokens: 0 },
+            "deepseek",
+            env.DEEPSEEK_MODEL,
+            "generation_failed",
+          );
+        }
+        send({ type: "error", message: readableGenerationError(error) });
       } finally {
         closed = true;
         controller.close();
@@ -509,7 +575,6 @@ export async function POST(
       "Content-Type": "text/event-stream; charset=utf-8",
       "Cache-Control": "no-cache, no-transform",
       Connection: "keep-alive",
-      // Stops nginx and similar proxies from buffering the whole response.
       "X-Accel-Buffering": "no",
     },
   });
