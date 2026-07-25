@@ -22,6 +22,8 @@ export interface GenerationStreamState {
   assumptions: string[];
   /** Non-empty when the agent stopped to ask instead of guessing. */
   questions: ClarifyingQuestion[];
+  /** Chain-of-thought produced so far. Proof of life during a silent stretch. */
+  thinkingChars: number;
   /** Paths in the order the agent opened them. */
   order: string[];
   /** Text written so far, keyed by path. */
@@ -37,6 +39,7 @@ const IDLE: GenerationStreamState = {
   changes: [],
   assumptions: [],
   questions: [],
+  thinkingChars: 0,
   order: [],
   drafts: {},
   logs: [],
@@ -65,6 +68,8 @@ export function useGenerationStream() {
             questions: event.questions,
             activePath: undefined,
           };
+        case "thinking":
+          return { ...current, thinkingChars: event.chars };
         case "file-open":
           return {
             ...current,

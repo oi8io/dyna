@@ -83,7 +83,9 @@ describe("AgentStreamParser", () => {
   it("emits open before delta and close after, in order, per file", () => {
     const deltas = collect([payload]);
     const shape = deltas
-      .filter((delta) => delta.path === "src/styles.css")
+      .filter(
+        (delta) => delta.type !== "thinking" && delta.path === "src/styles.css",
+      )
       .map((delta) => delta.type);
     expect(shape[0]).toBe("file-open");
     expect(shape.at(-1)).toBe("file-close");

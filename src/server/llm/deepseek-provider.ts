@@ -42,7 +42,7 @@ function stripCodeFence(value: string) {
 }
 
 interface DeepSeekStreamChunk {
-  choices?: Array<{ delta?: { content?: string } }>;
+  choices?: Array<{ delta?: { content?: string; reasoning_content?: string } }>;
   usage?: { prompt_tokens?: number; completion_tokens?: number };
 }
 
@@ -61,6 +61,7 @@ interface ChatMessage {
 async function consumeStream(
   response: Response,
   onProgress?: (delta: StreamDelta) => void,
+  onAlive?: () => void,
 ) {
   if (!response.body) throw new Error("DeepSeek returned no response body");
 
@@ -69,12 +70,15 @@ async function consumeStream(
   const parser = new AgentStreamParser();
   let wire = "";
   let content = "";
+  let reasoningChars = 0;
   let usage = { prompt_tokens: 0, completion_tokens: 0 };
 
   try {
     for (;;) {
       const { done, value } = await reader.read();
       if (done) break;
+      // Any byte counts as liveness, including chain-of-thought.
+      onAlive?.();
       wire += decoder.decode(value, { stream: true });
 
       let separator = wire.indexOf("\n\n");
@@ -105,6 +109,12 @@ async function consumeStream(
           };
         }
 
+        const reasoning = chunk.choices?.[0]?.delta?.reasoning_content;
+        if (reasoning) {
+          reasoningChars += reasoning.length;
+          onProgress?.({ type: "thinking", chars: reasoningChars });
+        }
+
         const text = chunk.choices?.[0]?.delta?.content;
         if (!text) continue;
         content += text;
@@ -123,6 +133,12 @@ async function callDeepSeek(
   messages: ChatMessage[],
   options: {
     temperature: number;
+    model: string;
+    /**
+     * Chain-of-thought costs a long silent warm-up before any answer text.
+     * Worth it when writing a game; pure overhead when emitting a short plan.
+     */
+    thinking: boolean;
     onProgress?: (delta: StreamDelta) => void;
     /** Remaining wall clock for the whole request, if the caller tracks one. */
     timeoutMs?: number;
@@ -134,8 +150,22 @@ async function callDeepSeek(
     options.timeoutMs ?? env.DEEPSEEK_TIMEOUT_MS,
   );
   if (budget <= 0) throw new Error("generation_deadline_exceeded");
+
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), budget);
+  // Two clocks: a hard ceiling from the caller's budget, and an idle timer that
+  // only fires when nothing at all has arrived. Reasoning tokens keep the idle
+  // timer alive, so a model that thinks for two minutes is no longer mistaken
+  // for a stalled request.
+  const ceiling = setTimeout(() => controller.abort(), budget);
+  let idle: ReturnType<typeof setTimeout> | undefined;
+  const keepAlive = () => {
+    clearTimeout(idle);
+    idle = setTimeout(
+      () => controller.abort(),
+      Math.min(env.DEEPSEEK_IDLE_TIMEOUT_MS, budget),
+    );
+  };
+  keepAlive();
 
   try {
     const response = await fetch(
@@ -147,8 +177,10 @@ async function callDeepSeek(
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          model: env.DEEPSEEK_MODEL,
-          temperature: options.temperature,
+          model: options.model,
+          // Ignored by the API in thinking mode, so only sent when it applies.
+          ...(options.thinking ? {} : { temperature: options.temperature }),
+          thinking: { type: options.thinking ? "enabled" : "disabled" },
           max_tokens: env.DEEPSEEK_MAX_OUTPUT_TOKENS,
           response_format: { type: "json_object" },
           stream: true,
@@ -160,14 +192,21 @@ async function callDeepSeek(
     );
 
     if (!response.ok) {
-      throw new Error(`DeepSeek request failed (${response.status})`);
+      throw new Error(
+        `DeepSeek request failed (${response.status}) for ${options.model}`,
+      );
     }
 
-    const { content, usage } = await consumeStream(response, options.onProgress);
+    const { content, usage } = await consumeStream(
+      response,
+      options.onProgress,
+      keepAlive,
+    );
     if (!content) throw new Error("DeepSeek returned an empty response");
     return { content, usage };
   } finally {
-    clearTimeout(timeout);
+    clearTimeout(ceiling);
+    clearTimeout(idle);
   }
 }
 
@@ -222,9 +261,15 @@ export class DeepSeekGameProvider implements GameGenerationProvider {
           content: `${contextBlock(input, false)}\n\nUser request (${input.kind}):\n${input.prompt}`,
         },
       ],
-      // Planning is a comprehension task; variance here only produces
-      // inconsistent readings of the same request.
-      { temperature: 0.1, timeoutMs: input.timeoutMs },
+      // Comprehension plus a short JSON. Chain-of-thought buys nothing here and
+      // costs the warm-up that was timing this stage out, and disabling it also
+      // makes `temperature` take effect again.
+      {
+        temperature: 0.1,
+        model: env.DEEPSEEK_PLAN_MODEL,
+        thinking: false,
+        timeoutMs: input.timeoutMs,
+      },
     );
 
     const plan = generationPlanSchema.parse(
@@ -274,8 +319,11 @@ export class DeepSeekGameProvider implements GameGenerationProvider {
       );
     }
 
+    // Writing a whole game is where reasoning actually pays for itself.
     const { content, usage } = await callDeepSeek(messages, {
       temperature: input.kind === "edit" ? 0.2 : 0.6,
+      model: env.DEEPSEEK_MODEL,
+      thinking: true,
       onProgress: input.onProgress,
       timeoutMs: input.timeoutMs,
     });

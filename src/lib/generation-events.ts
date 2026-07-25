@@ -37,6 +37,8 @@ export type GenerationEvent =
       understanding: string;
       questions: ClarifyingQuestion[];
     }
+  /** Chain-of-thought is streaming. Progress, even with no answer text yet. */
+  | { type: "thinking"; chars: number }
   | { type: "file-open"; path: string }
   | { type: "file-delta"; path: string; text: string }
   | { type: "file-close"; path: string }
@@ -47,7 +49,7 @@ export type GenerationEvent =
 /** The subset a provider can emit while the model is still producing tokens. */
 export type StreamDelta = Extract<
   GenerationEvent,
-  { type: "file-open" | "file-delta" | "file-close" }
+  { type: "thinking" | "file-open" | "file-delta" | "file-close" }
 >;
 
 export const PHASE_LABELS: Record<GenerationPhase, string> = {

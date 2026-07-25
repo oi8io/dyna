@@ -31,7 +31,25 @@ const serverEnvSchema = z.object({
   DEEPSEEK_API_KEY: z.string().min(1),
   DEEPSEEK_BASE_URL: z.url().default("https://api.deepseek.com"),
   DEEPSEEK_MODEL: z.string().default("deepseek-v4-pro"),
+  /**
+   * Model for the planning stage.
+   *
+   * Planning is comprehension plus a few hundred tokens of JSON. Running it on
+   * the reasoning-heavy model meant paying a full chain-of-thought warm-up for
+   * every request — the stage that produces the least output was taking the
+   * longest. Flash is roughly a third of the price and has five times the
+   * concurrency headroom.
+   */
+  DEEPSEEK_PLAN_MODEL: z.string().default("deepseek-v4-flash"),
   DEEPSEEK_TIMEOUT_MS: z.coerce.number().int().positive().default(120_000),
+  /**
+   * Abort only after this long with no bytes at all.
+   *
+   * A total timeout cannot tell a stalled request from one that is thinking
+   * hard: chain-of-thought arrives as `reasoning_content`, which is real
+   * progress even though no answer text has appeared yet.
+   */
+  DEEPSEEK_IDLE_TIMEOUT_MS: z.coerce.number().int().positive().default(45_000),
   DEEPSEEK_MAX_OUTPUT_TOKENS: z.coerce
     .number()
     .int()
