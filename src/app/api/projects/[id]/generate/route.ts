@@ -36,10 +36,31 @@ const HISTORY_TURNS = 12;
  */
 const DEADLINE_MS = (maxDuration - 20) * 1000;
 
+/**
+ * Planning emits a few hundred tokens of JSON. If it cannot manage that inside
+ * a minute the request is not going to finish anyway, and every second spent
+ * here is one the code-writing stage does not get.
+ */
+const PLAN_MAX_MS = 60_000;
 /** Time the build and persistence steps still need after the last model call. */
 const BUILD_RESERVE_MS = 100_000;
 /** Below this, a repair pass cannot finish, so it is not started. */
 const REPAIR_MIN_MS = 70_000;
+
+/**
+ * Names the stage that ran out of time.
+ *
+ * An `AbortError` on its own says "This operation was aborted" and nothing
+ * else — not which of the two or three model calls it was, which is the only
+ * part worth knowing when deciding what to change.
+ */
+function labelStage(error: unknown, stage: string): unknown {
+  const message = error instanceof Error ? error.message : String(error);
+  if (/abort/i.test(message)) {
+    return new Error(`${stage}_timed_out: ${message}`);
+  }
+  return error;
+}
 
 const paramsSchema = z.object({ id: z.uuid() });
 const generateSchema = z.object({
@@ -61,6 +82,12 @@ function readableGenerationError(error: unknown) {
   if (message.includes("duplicate key")) return "已有生成任务正在进行。";
   if (message.includes("snapshot_unreadable"))
     return "上一个版本的源码快照损坏，无法在其基础上修改。";
+  if (message.includes("plan_timed_out")) {
+    return "理解需求这一步超时了。模型响应偏慢，稍后再试一次通常就好。";
+  }
+  if (message.includes("write_timed_out") || message.includes("repair_timed_out")) {
+    return "写代码这一步超时了。把改动拆小一点分几次说，通常就能过。";
+  }
   if (
     message.includes("generation_deadline_exceeded") ||
     message.includes("aborted") ||
@@ -215,10 +242,17 @@ export async function POST(
 
         // Stage one: decide what to do, or ask.
         send({ type: "phase", phase: "planning", message: "正在理解需求" });
-        const { plan, ...planMeta } = await provider.plan({
-          ...planInput,
-          timeoutMs: remainingMs() - BUILD_RESERVE_MS,
-        });
+        const { plan, ...planMeta } = await provider
+          .plan({
+            ...planInput,
+            timeoutMs: Math.min(
+              PLAN_MAX_MS,
+              remainingMs() - BUILD_RESERVE_MS,
+            ),
+          })
+          .catch((error: unknown) => {
+            throw labelStage(error, "plan");
+          });
 
         if (planNeedsClarification(plan)) {
           // Nothing was built, so nothing is charged. The reservation is
@@ -271,12 +305,16 @@ export async function POST(
 
         // Stage two: implement the agreed plan.
         send({ type: "phase", phase: "writing", message: "正在写代码" });
-        let result = await provider.generate({
-          ...planInput,
-          plan,
-          onProgress: send,
-          timeoutMs: remainingMs() - BUILD_RESERVE_MS,
-        });
+        let result = await provider
+          .generate({
+            ...planInput,
+            plan,
+            onProgress: send,
+            timeoutMs: remainingMs() - BUILD_RESERVE_MS,
+          })
+          .catch((error: unknown) => {
+            throw labelStage(error, "write");
+          });
 
         send({ type: "phase", phase: "building", message: "正在隔离构建" });
         let build;
@@ -304,13 +342,17 @@ export async function POST(
           const attemptedFiles = result.workspace.files.filter((file) =>
             result.changedPaths.includes(file.path),
           ) as AgentFile[];
-          result = await provider.generate({
-            ...planInput,
-            plan,
-            onProgress: send,
-            repair: { attemptedFiles, error: detail },
-            timeoutMs: remainingMs() - BUILD_RESERVE_MS,
-          });
+          result = await provider
+            .generate({
+              ...planInput,
+              plan,
+              onProgress: send,
+              repair: { attemptedFiles, error: detail },
+              timeoutMs: remainingMs() - BUILD_RESERVE_MS,
+            })
+            .catch((cause: unknown) => {
+              throw labelStage(cause, "repair");
+            });
           build = await buildGeneratedWorkspace(
             result.workspace,
             result.prebuiltArtifactHtml,
