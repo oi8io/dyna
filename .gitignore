@@ -1,0 +1,42 @@
+# Dependencies and build output
+node_modules/
+.next/
+out/
+dist/
+coverage/
+*.tsbuildinfo
+.turbo/
+.pnpm-store/
+
+# Test output
+playwright-report/
+test-results/
+
+# Local environment and credentials
+.env
+.env.*
+!.env.example
+client_secret_*.json
+*.pem
+*.key
+
+# Local service state
+.vercel/
+supabase/.temp/
+supabase/.branches/
+.claude/
+.idea/
+*.iml
+
+# Local scratch material and macOS aliases
+simple/
+* alias
+
+# Generated project analysis
+graphify-out/
+
+# Internal planning and confidential source material
+docs/
+# Logs and operating-system files
+*.log
+.DS_Store

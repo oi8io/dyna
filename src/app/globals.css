@@ -1,0 +1,62 @@
+@import "tailwindcss";
+
+@theme {
+  /* Surfaces — warm paper, not clinical white */
+  --color-canvas: #faf8f5;
+  --color-canvas-sunken: #f4f1ec;
+  --color-surface: #ffffff;
+
+  /* Lines */
+  --color-line: #e8e2d9;
+  --color-line-strong: #d5ccbf;
+
+  /* Text */
+  --color-ink: #1b1815;
+  --color-ink-soft: #6d655b;
+  --color-ink-faint: #9b9288;
+
+  /* One accent, used sparingly */
+  --color-accent: #bf4f32;
+  --color-accent-hover: #a53f25;
+  --color-accent-soft: #fbeee9;
+
+  --font-sans:
+    ui-sans-serif, system-ui, -apple-system, "Segoe UI", "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  --font-serif:
+    ui-serif, Georgia, Cambria, "Songti SC", "Noto Serif CJK SC", serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  background: var(--color-canvas);
+}
+
+body {
+  min-height: 100vh;
+  margin: 0;
+  color: var(--color-ink);
+  background: var(--color-canvas);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  color: var(--color-accent-hover);
+  background: var(--color-accent-soft);
+}
+
+button,
+a,
+input,
+textarea {
+  -webkit-tap-highlight-color: transparent;
+}
+
+.scrollbar-thin {
+  scrollbar-color: var(--color-line-strong) transparent;
+  scrollbar-width: thin;
+}
