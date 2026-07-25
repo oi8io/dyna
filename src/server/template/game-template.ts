@@ -54,6 +54,10 @@ const TEMPLATE_FILES: GeneratedWorkspace["files"] = [
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 const result = await esbuild.build({
   entryPoints: ["src/main.tsx"],
+  // Required: with write:false and a CSS import, esbuild refuses to emit
+  // without somewhere to name the outputs. Its absence made every sandbox
+  // build fail on a project that built fine locally.
+  outdir: "dist",
   bundle: true,
   write: false,
   minify: true,

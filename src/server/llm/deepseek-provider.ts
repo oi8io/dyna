@@ -244,6 +244,29 @@ function contextBlock(input: PlanInput, includeSource: boolean) {
   return parts.join("\n\n");
 }
 
+/**
+ * The exact specifier one workspace file should use to import another.
+ *
+ * Counting `../` levels across directories is arithmetic the model gets wrong
+ * often enough to be the leading cause of failed builds, and it is arithmetic
+ * we can simply do for it.
+ */
+function relativeSpecifier(fromPath: string, toPath: string) {
+  const from = fromPath.split("/").slice(0, -1);
+  const to = toPath.split("/");
+  const file = to.pop() ?? "";
+  let shared = 0;
+  while (shared < from.length && shared < to.length && from[shared] === to[shared]) {
+    shared += 1;
+  }
+  const up = Array.from({ length: from.length - shared }, () => "..");
+  const down = to.slice(shared);
+  const stem = file.replace(/\.(ts|tsx|js|jsx)$/, "");
+  const segments = [...up, ...down, stem];
+  const joined = segments.join("/");
+  return joined.startsWith(".") ? joined : `./${joined}`;
+}
+
 export class DeepSeekGameProvider implements GameGenerationProvider {
   async plan(input: PlanInput): Promise<PlanResult> {
     const env = getServerEnv();
@@ -286,7 +309,10 @@ export class DeepSeekGameProvider implements GameGenerationProvider {
     const env = getServerEnv();
 
     const written = Object.entries(input.drafts)
-      .map(([path, content]) => `--- ${path} (already written) ---\n${content}`)
+      .map(
+        ([path, content]) =>
+          `--- ${path} (already written; import it as "${relativeSpecifier(input.path, path)}") ---\n${content}`,
+      )
       .join("\n\n");
     const pending = input.plan.changes
       .filter(

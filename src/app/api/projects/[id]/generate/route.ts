@@ -5,6 +5,11 @@ import type { GenerationEvent } from "@/lib/generation-events";
 import { encodeSseFrame } from "@/lib/sse";
 import { createClient } from "@/lib/supabase/server";
 import { buildGeneratedWorkspace } from "@/server/build";
+import {
+  describeUnresolvedImports,
+  findUnresolvedImports,
+  isRepairableByAgent,
+} from "@/server/build/imports";
 import { getServerEnv, isLiveGenerationReady } from "@/server/env";
 import { getGameGenerationProvider } from "@/server/llm";
 import { generationPlanSchema, planNeedsClarification } from "@/server/llm/plan";
@@ -418,14 +423,38 @@ export async function POST(
         let workspace = assemble(changed as AgentFile[]);
         const prebuilt = provider.prebuiltArtifactHtml?.(input);
 
+        // Cross-file references are the main failure mode of per-file writing,
+        // and they are decidable from the file list. Catching them here costs
+        // microseconds; catching them in the sandbox costs a microVM, a
+        // dependency install and a repair call.
+        const unresolved = findUnresolvedImports(workspace);
+        if (unresolved.length) {
+          send({
+            type: "log",
+            level: "error",
+            message: describeUnresolvedImports(unresolved),
+          });
+        }
+
         send({ type: "phase", phase: "building", message: "正在隔离构建" });
         let build;
         try {
+          if (unresolved.length) {
+            throw new Error(
+              `import_unresolved: ${describeUnresolvedImports(unresolved)}`,
+            );
+          }
           build = await buildGeneratedWorkspace(workspace, prebuilt);
         } catch (buildError) {
           const detail = generationErrorDetail(buildError);
           send({ type: "log", level: "error", message: detail });
           if (remainingMs() < REPAIR_MIN_MS) throw buildError;
+          // A failure whose only named files are platform-owned cannot be
+          // repaired by the agent — it is not allowed to write them. Retrying
+          // just spends tokens on an impossible task.
+          if (!isRepairableByAgent(detail, changed.map((file) => file.path))) {
+            throw buildError;
+          }
 
           // Repair the single most likely culprit rather than everything: the
           // last file written is where a compile error almost always lives.
