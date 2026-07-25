@@ -4,7 +4,6 @@ import { ArrowRight, LoaderCircle } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { FormEvent, useState } from "react";
 
-import { runGeneration } from "@/lib/run-generation";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 
@@ -20,14 +19,20 @@ export function NewProjectForm({ initialPrompt }: { initialPrompt?: string }) {
     initialPrompt?.trim().slice(0, 4000) || examples[0],
   );
   const [busy, setBusy] = useState(false);
-  const [phase, setPhase] = useState<string>();
   const [error, setError] = useState<string>();
 
+  /**
+   * Creates the project and hands off immediately.
+   *
+   * Generation used to run here, which meant staring at this form for the
+   * couple of minutes a two-stage run takes, and only reaching the editor once
+   * everything was already finished. The builder starts the run itself, so the
+   * code appears as it is written.
+   */
   async function submit(event: FormEvent) {
     event.preventDefault();
     if (busy) return;
     setBusy(true);
-    setPhase(undefined);
     setError(undefined);
 
     try {
@@ -44,23 +49,7 @@ export function NewProjectForm({ initialPrompt }: { initialPrompt?: string }) {
         throw new Error(created.error ?? "项目创建失败。");
       }
 
-      // The first generation streams too, but there is no editor to show it in
-      // yet — the phase label is enough feedback until the builder opens.
-      const generated = await runGeneration({
-        projectId: created.projectId,
-        prompt,
-        kind: "create",
-        onEvent: (event) => {
-          if (event.type === "phase") setPhase(event.message);
-          if (event.type === "file-open") setPhase(`正在写 ${event.path}`);
-        },
-      });
-      if (!generated.ok) {
-        throw new Error(generated.error ?? "生成失败。");
-      }
-
       router.push(`/builder/${created.projectId}`);
-      router.refresh();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "发生未知错误。");
       setBusy(false);
@@ -80,11 +69,11 @@ export function NewProjectForm({ initialPrompt }: { initialPrompt?: string }) {
         />
         <div className="flex items-center justify-between gap-3 border-t border-line px-4 py-3">
           <span className="truncate font-mono text-xs text-ink-faint">
-            {busy ? (phase ?? "正在启动…") : `${prompt.length}/4000`}
+            {busy ? "正在打开工作台…" : `${prompt.length}/4000`}
           </span>
           <Button type="submit" disabled={busy || prompt.trim().length < 8}>
             {busy && <LoaderCircle className="size-4 animate-spin" />}
-            {busy ? "正在构建…" : "开始制作"}
+            {busy ? "正在打开…" : "开始制作"}
             {!busy && <ArrowRight className="size-4" />}
           </Button>
         </div>

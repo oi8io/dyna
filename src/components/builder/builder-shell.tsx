@@ -38,6 +38,12 @@ interface BuilderShellProps {
   publishedVisibility?: WorkVisibility;
   /** `error_code` from the most recent failed job, when there is one. */
   lastErrorCode?: string;
+  /**
+   * True for a project that was created but never generated. The builder kicks
+   * off the first run itself so the user watches the code appear here instead
+   * of waiting on the previous page for a finished result.
+   */
+  autoStart?: boolean;
 }
 
 /**
@@ -89,6 +95,7 @@ export function BuilderShell({
   publishedSlug,
   publishedVisibility,
   lastErrorCode,
+  autoStart = false,
 }: BuilderShellProps) {
   const [messages, setMessages] = useState(initialMessages);
   const [prompt, setPrompt] = useState("");
@@ -158,6 +165,19 @@ export function BuilderShell({
     setPrompt("");
     await submitTurn(content);
   }
+
+  // Fires once. The ref guards against React's development double-invoke, which
+  // would otherwise start two generations and burn two reservations.
+  const autoStarted = useRef(false);
+  useEffect(() => {
+    if (!autoStart || autoStarted.current) return;
+    autoStarted.current = true;
+    setWorkspaceTab("code");
+    void submitTurn(project.original_prompt);
+    // submitTurn is stable for this purpose: it only reads state the first run
+    // cannot have changed yet.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoStart]);
 
   // While streaming, the file tree and editor show what is being written now.
   const streamingFiles = stream.order.map((path) => ({
@@ -362,22 +382,15 @@ export function BuilderShell({
                       </p>
                     </div>
 
-                    {failure.detail ? (
+                    {failure.detail && (
                       <div>
                         <p className="mb-1.5 text-xs text-ink-faint">
-                          详细报错（已脱敏，仅开发环境记录）
+                          详细报错（已脱敏）
                         </p>
                         <pre className="scrollbar-thin max-h-64 overflow-auto rounded-lg border border-line bg-canvas-sunken p-3 text-[11px] leading-5 text-ink-soft">
                           <code>{failure.detail}</code>
                         </pre>
                       </div>
-                    ) : (
-                      <p className="text-xs leading-5 text-ink-faint">
-                        生产环境不记录详细报错。要看完整堆栈，用
-                        <code className="mx-1 font-mono">NODE_ENV=development</code>
-                        重跑一次，或查服务端日志里的
-                        <code className="mx-1 font-mono">[generation_failed]</code>。
-                      </p>
                     )}
                   </div>
                 )}

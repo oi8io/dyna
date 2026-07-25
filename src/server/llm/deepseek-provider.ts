@@ -124,11 +124,18 @@ async function callDeepSeek(
   options: {
     temperature: number;
     onProgress?: (delta: StreamDelta) => void;
+    /** Remaining wall clock for the whole request, if the caller tracks one. */
+    timeoutMs?: number;
   },
 ) {
   const env = getServerEnv();
+  const budget = Math.min(
+    env.DEEPSEEK_TIMEOUT_MS,
+    options.timeoutMs ?? env.DEEPSEEK_TIMEOUT_MS,
+  );
+  if (budget <= 0) throw new Error("generation_deadline_exceeded");
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), env.DEEPSEEK_TIMEOUT_MS);
+  const timeout = setTimeout(() => controller.abort(), budget);
 
   try {
     const response = await fetch(
@@ -217,7 +224,7 @@ export class DeepSeekGameProvider implements GameGenerationProvider {
       ],
       // Planning is a comprehension task; variance here only produces
       // inconsistent readings of the same request.
-      { temperature: 0.1 },
+      { temperature: 0.1, timeoutMs: input.timeoutMs },
     );
 
     const plan = generationPlanSchema.parse(
@@ -270,6 +277,7 @@ export class DeepSeekGameProvider implements GameGenerationProvider {
     const { content, usage } = await callDeepSeek(messages, {
       temperature: input.kind === "edit" ? 0.2 : 0.6,
       onProgress: input.onProgress,
+      timeoutMs: input.timeoutMs,
     });
 
     const generated = buildResponseSchema.parse(

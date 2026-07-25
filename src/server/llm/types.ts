@@ -25,6 +25,14 @@ export interface PlanInput {
   /** Recent turns, oldest first. */
   history: ConversationTurn[];
   previousWorkspace?: GeneratedWorkspace;
+  /**
+   * Upper bound for this single call, in milliseconds.
+   *
+   * The route runs several model calls inside one serverless invocation that
+   * the platform kills at a fixed wall clock. Each stage is capped by whatever
+   * is left of that budget, not by the per-call timeout alone.
+   */
+  timeoutMs?: number;
 }
 
 export interface BuildInput extends PlanInput {

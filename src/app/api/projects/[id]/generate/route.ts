@@ -26,6 +26,21 @@ export const maxDuration = 300;
 /** How much conversation to replay. Enough for context, bounded for cost. */
 const HISTORY_TURNS = 12;
 
+/**
+ * Wall clock this handler gives itself, under the platform's `maxDuration`.
+ *
+ * Being killed by the platform is not a graceful failure: the `finally` block
+ * never runs, so `finalize_generation` never releases the reserved budget and
+ * the job stays `running` forever. Finishing early on our own terms — with a
+ * real error event and a settled job — is strictly better than being cut off.
+ */
+const DEADLINE_MS = (maxDuration - 20) * 1000;
+
+/** Time the build and persistence steps still need after the last model call. */
+const BUILD_RESERVE_MS = 100_000;
+/** Below this, a repair pass cannot finish, so it is not started. */
+const REPAIR_MIN_MS = 70_000;
+
 const paramsSchema = z.object({ id: z.uuid() });
 const generateSchema = z.object({
   prompt: z.string().trim().min(3).max(4000),
@@ -46,6 +61,13 @@ function readableGenerationError(error: unknown) {
   if (message.includes("duplicate key")) return "已有生成任务正在进行。";
   if (message.includes("snapshot_unreadable"))
     return "上一个版本的源码快照损坏，无法在其基础上修改。";
+  if (
+    message.includes("generation_deadline_exceeded") ||
+    message.includes("aborted") ||
+    message.includes("AbortError")
+  ) {
+    return "这次生成超时了。换一个更小的改动分几次说，通常就能过。";
+  }
   return "生成失败，请稍后重试。";
 }
 
@@ -91,6 +113,9 @@ export async function POST(
         if (closed) return;
         controller.enqueue(encoder.encode(encodeSseFrame(event)));
       };
+
+      const startedAt = Date.now();
+      const remainingMs = () => DEADLINE_MS - (Date.now() - startedAt);
 
       const live = isLiveGenerationReady();
       const env = getServerEnv();
@@ -190,7 +215,10 @@ export async function POST(
 
         // Stage one: decide what to do, or ask.
         send({ type: "phase", phase: "planning", message: "正在理解需求" });
-        const { plan, ...planMeta } = await provider.plan(planInput);
+        const { plan, ...planMeta } = await provider.plan({
+          ...planInput,
+          timeoutMs: remainingMs() - BUILD_RESERVE_MS,
+        });
 
         if (planNeedsClarification(plan)) {
           // Nothing was built, so nothing is charged. The reservation is
@@ -247,6 +275,7 @@ export async function POST(
           ...planInput,
           plan,
           onProgress: send,
+          timeoutMs: remainingMs() - BUILD_RESERVE_MS,
         });
 
         send({ type: "phase", phase: "building", message: "正在隔离构建" });
@@ -257,10 +286,16 @@ export async function POST(
             result.prebuiltArtifactHtml,
           );
         } catch (buildError) {
-          // One repair pass. The model has never seen its own compiler errors
-          // before; showing them converts most failures into successes.
           const detail = generationErrorDetail(buildError);
           send({ type: "log", level: "error", message: detail });
+
+          // One repair pass. The model has never seen its own compiler errors
+          // before; showing them converts most failures into successes. Started
+          // only when there is time to finish it — a repair cut off by the
+          // platform loses the reservation as well as the attempt.
+          if (remainingMs() < REPAIR_MIN_MS) {
+            throw buildError;
+          }
           send({
             type: "phase",
             phase: "repairing",
@@ -274,6 +309,7 @@ export async function POST(
             plan,
             onProgress: send,
             repair: { attemptedFiles, error: detail },
+            timeoutMs: remainingMs() - BUILD_RESERVE_MS,
           });
           build = await buildGeneratedWorkspace(
             result.workspace,
@@ -287,21 +323,24 @@ export async function POST(
 
         // The platform renders SPEC.md from the plan rather than letting the
         // model write it: the shape stays stable and the changelog accumulates.
-        const specFile = {
-          path: SPEC_PATH,
-          content: renderSpecMarkdown(
-            plan.spec,
-            appendChangelog(
-              extractChangelog(specMarkdown ?? ""),
-              plan.changeSummary,
-            ),
-          ),
-        };
+        // When the plan came back without a spec, the previous one is carried
+        // forward untouched rather than being dropped.
+        const specContent = plan.spec
+          ? renderSpecMarkdown(
+              plan.spec,
+              appendChangelog(
+                extractChangelog(specMarkdown ?? ""),
+                plan.changeSummary,
+              ),
+            )
+          : specMarkdown;
         const workspace: GeneratedWorkspace = {
           ...result.workspace,
           files: [
             ...result.workspace.files.filter((file) => file.path !== SPEC_PATH),
-            specFile,
+            ...(specContent
+              ? [{ path: SPEC_PATH, content: specContent }]
+              : []),
           ],
         };
 
@@ -397,8 +436,11 @@ export async function POST(
             metadata: {
               error: true,
               kind: body.data.kind,
-              detail:
-                process.env.NODE_ENV === "development" ? errorDetail : undefined,
+              // Stored in production too. It has already been through
+              // `redactBuildLog`, and without it a failure on a deployment is
+              // undiagnosable from the UI — the cause only exists in a platform
+              // log the person who hit the error usually cannot read.
+              detail: errorDetail,
             },
           }),
         ]);
@@ -411,10 +453,7 @@ export async function POST(
         );
         send({
           type: "error",
-          message:
-            process.env.NODE_ENV === "development"
-              ? `生成失败：${errorDetail}`
-              : readableGenerationError(error),
+          message: readableGenerationError(error),
         });
       } finally {
         closed = true;

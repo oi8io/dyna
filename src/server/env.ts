@@ -17,7 +17,10 @@ const optionalPositiveInteger = z
 const serverEnvSchema = z.object({
   SUPABASE_URL: z.url(),
   SUPABASE_PUBLISHABLE_KEY: z.string().min(1),
-  SUPABASE_SECRET_KEY: z.string().startsWith("sb_secret_"),
+  // No service-role key on purpose. Every database access goes through either
+  // the RLS-constrained server client or a SECURITY DEFINER function, so the
+  // one credential that could read and delete every user's data never needs to
+  // exist in the deployment at all.
   SUPABASE_JWKS_URL: z.url(),
   AI_PROVIDER: z.literal("deepseek").default("deepseek"),
   AI_PROVIDER_MODE: z.enum(["fake", "live"]).default("fake"),

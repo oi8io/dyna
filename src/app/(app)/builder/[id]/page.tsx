@@ -78,14 +78,21 @@ export default async function BuilderProjectPage({
   ]);
 
   const version = versionData as ProjectVersion | null;
+  const messages = (messagesData ?? []) as Message[];
+
+  // Zero messages means nothing has ever been attempted for this project — the
+  // user just created it and was sent straight here. A failed run leaves both a
+  // user and an assistant turn behind, so this cannot re-trigger on a retry.
+  const autoStart = !version && messages.length === 0;
 
   return (
     <BuilderShell
       project={project}
+      autoStart={autoStart}
       artifactHtml={version?.artifact_html ?? undefined}
       versionNumber={version?.version_number}
       files={(filesData ?? []) as ProjectFile[]}
-      messages={(messagesData ?? []) as Message[]}
+      messages={messages}
       buildLog={version?.build_log}
       publishedSlug={publishedData?.slug}
       publishedVisibility={publishedData?.visibility}
