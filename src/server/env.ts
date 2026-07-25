@@ -41,6 +41,18 @@ const serverEnvSchema = z.object({
    * concurrency headroom.
    */
   DEEPSEEK_PLAN_MODEL: z.string().default("deepseek-v4-flash"),
+  /**
+   * Whether the code-writing stage reasons before answering.
+   *
+   * Reasoning improves the code but is the single largest contributor to the
+   * stage's duration, and the whole generation has to fit inside one
+   * serverless invocation. Exposed as a switch so the quality/latency trade
+   * can be measured on a real deployment rather than argued about.
+   */
+  DEEPSEEK_WRITE_THINKING: z
+    .enum(["enabled", "disabled"])
+    .default("enabled")
+    .transform((value) => value === "enabled"),
   DEEPSEEK_TIMEOUT_MS: z.coerce.number().int().positive().default(120_000),
   /**
    * Abort only after this long with no bytes at all.

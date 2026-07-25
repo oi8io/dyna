@@ -319,11 +319,12 @@ export class DeepSeekGameProvider implements GameGenerationProvider {
       );
     }
 
-    // Writing a whole game is where reasoning actually pays for itself.
+    // Writing a whole game is where reasoning can pay for itself — and also
+    // where it costs the most time, against a fixed serverless wall clock.
     const { content, usage } = await callDeepSeek(messages, {
       temperature: input.kind === "edit" ? 0.2 : 0.6,
       model: env.DEEPSEEK_MODEL,
-      thinking: true,
+      thinking: env.DEEPSEEK_WRITE_THINKING,
       onProgress: input.onProgress,
       timeoutMs: input.timeoutMs,
     });
