@@ -298,8 +298,10 @@ export function BuilderShell({
             {busy && (
               <div className="mr-6 flex items-center gap-2 rounded-lg border border-line bg-canvas-sunken p-3 text-sm text-ink-soft">
                 <LoaderCircle className="size-4 animate-spin" />
-                {stream.phaseLabel ?? "正在处理…"}
-                {stream.thinkingChars > 0 && (
+                {stream.connected
+                  ? (stream.phaseLabel ?? "正在处理…")
+                  : "连接断了，正在重连——生成还在继续"}
+                {stream.connected && stream.thinkingChars > 0 && (
                   <span className="ml-auto font-mono text-xs text-ink-faint">
                     已推理 {stream.thinkingChars} 字
                   </span>

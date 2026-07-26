@@ -37,10 +37,6 @@ export type GenerationEvent =
       understanding: string;
       questions: ClarifyingQuestion[];
     }
-  /** The plan was accepted; these files will be written one request each. */
-  | { type: "job"; jobId: string; files: string[] }
-  /** One planned file finished. `nextPath` is absent when that was the last. */
-  | { type: "step-done"; path: string; nextPath?: string }
   /** Chain-of-thought is streaming. Progress, even with no answer text yet. */
   | { type: "thinking"; chars: number }
   | { type: "file-open"; path: string }

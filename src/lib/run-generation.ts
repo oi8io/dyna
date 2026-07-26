@@ -1,120 +1,102 @@
 import type { GenerationEvent } from "@/lib/generation-events";
-import { createSseDecoder } from "@/lib/sse";
 
 interface RunGenerationOptions {
   projectId: string;
   prompt: string;
   kind: "create" | "edit";
   onEvent: (event: GenerationEvent) => void;
-  signal?: AbortSignal;
-}
-
-type Phase =
-  | { phase: "plan"; prompt: string; kind: string; idempotencyKey: string }
-  | { phase: "write"; jobId: string };
-
-interface PhaseOutcome {
-  ok: boolean;
-  error?: string;
-  jobId?: string;
-  files?: string[];
-  /** True when the run ended because the agent asked something. */
-  asked?: boolean;
-}
-
-/** Runs one phase and drains its event stream. */
-async function runPhase(
-  projectId: string,
-  body: Phase,
-  onEvent: (event: GenerationEvent) => void,
-  signal?: AbortSignal,
-): Promise<PhaseOutcome> {
-  const response = await fetch(`/api/projects/${projectId}/generate`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-    signal,
-  });
-
-  if (!response.ok || !response.body) {
-    const result = (await response.json().catch(() => ({}))) as {
-      error?: string;
-    };
-    return { ok: false, error: result.error ?? "生成失败，请稍后重试。" };
-  }
-
-  const reader = response.body.getReader();
-  const textDecoder = new TextDecoder();
-  const decode = createSseDecoder<GenerationEvent>();
-  const outcome: PhaseOutcome = {
-    ok: true,
-    error: undefined,
-  };
-  let sawTerminalError = false;
-
-  try {
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      for (const event of decode(textDecoder.decode(value, { stream: true }))) {
-        onEvent(event);
-        if (event.type === "job") {
-          outcome.jobId = event.jobId;
-          outcome.files = event.files;
-        }
-        if (event.type === "question") outcome.asked = true;
-        if (event.type === "error") {
-          sawTerminalError = true;
-          outcome.error = event.message;
-        }
-      }
-    }
-  } finally {
-    reader.releaseLock();
-  }
-
-  if (sawTerminalError) outcome.ok = false;
-  return outcome;
+  /** Fired when the connection drops and again when it comes back. */
+  onConnectionChange?: (connected: boolean) => void;
 }
 
 /**
- * Drives a generation to completion.
+ * Starts a generation and follows it until it ends.
  *
- * Two requests: understand the request, then write and build. The first can end
- * the run by asking a question, which is why it is separate — everything after
- * it assumes the plan was agreed. The files themselves are written together, in
- * one model call, because they have to agree with each other.
+ * The run lives on the server, not in this connection. `EventSource` handles
+ * reconnection and replays `Last-Event-ID`, so a dropped network — or a phone
+ * that froze the tab — resumes the same run rather than abandoning it.
  */
 export async function runGeneration({
   projectId,
   prompt,
   kind,
   onEvent,
-  signal,
+  onConnectionChange,
 }: RunGenerationOptions): Promise<{ ok: boolean; error?: string }> {
-  const planned = await runPhase(
-    projectId,
-    {
-      phase: "plan",
+  const response = await fetch(`/api/projects/${projectId}/generate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
       prompt,
       kind,
       idempotencyKey: crypto.randomUUID(),
-    },
-    onEvent,
-    signal,
-  );
-  if (!planned.ok) return { ok: false, error: planned.error };
-  // The agent stopped to ask. Nothing was built and nothing was charged.
-  if (planned.asked) return { ok: false };
-  if (!planned.jobId || !planned.files?.length) {
-    return { ok: false, error: "计划没有指出要写哪些文件。" };
+    }),
+  });
+
+  const started = (await response.json().catch(() => ({}))) as {
+    runId?: string;
+    error?: string;
+  };
+  if (!response.ok || !started.runId) {
+    return { ok: false, error: started.error ?? "生成失败，请稍后重试。" };
   }
 
-  const written = await runPhase(
+  return watchGeneration({
     projectId,
-    { phase: "write", jobId: planned.jobId },
+    runId: started.runId,
     onEvent,
-    signal,
-  );
-  return { ok: written.ok, error: written.error };
+    onConnectionChange,
+  });
+}
+
+export function watchGeneration({
+  projectId,
+  runId,
+  onEvent,
+  onConnectionChange,
+}: {
+  projectId: string;
+  runId: string;
+  onEvent: (event: GenerationEvent) => void;
+  onConnectionChange?: (connected: boolean) => void;
+}): Promise<{ ok: boolean; error?: string }> {
+  return new Promise((resolve) => {
+    const source = new EventSource(
+      `/api/projects/${projectId}/generate/stream?runId=${encodeURIComponent(runId)}`,
+    );
+    let settled = false;
+
+    const finish = (outcome: { ok: boolean; error?: string }) => {
+      if (settled) return;
+      settled = true;
+      source.close();
+      resolve(outcome);
+    };
+
+    source.onopen = () => onConnectionChange?.(true);
+
+    source.onmessage = (message) => {
+      let event: GenerationEvent;
+      try {
+        event = JSON.parse(message.data) as GenerationEvent;
+      } catch {
+        return;
+      }
+      onEvent(event);
+      if (event.type === "done") finish({ ok: true });
+      if (event.type === "error") finish({ ok: false, error: event.message });
+      // A question ends the run without building anything.
+      if (event.type === "question") finish({ ok: false });
+    };
+
+    source.onerror = () => {
+      // EventSource retries on its own while readyState is CONNECTING. Only a
+      // closed source is terminal — and by then the run has either finished or
+      // been evicted, so the page reload below picks up the real state.
+      onConnectionChange?.(false);
+      if (source.readyState === EventSource.CLOSED) {
+        finish({ ok: false, error: "连接已断开，刷新页面查看最新结果。" });
+      }
+    };
+  });
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useState } from "react";
 
 import type {
   ClarifyingQuestion,
@@ -24,6 +24,8 @@ export interface GenerationStreamState {
   questions: ClarifyingQuestion[];
   /** Chain-of-thought produced so far. Proof of life during a silent stretch. */
   thinkingChars: number;
+  /** False while the browser is retrying a dropped stream. The run continues. */
+  connected: boolean;
   /** Paths in the order the agent opened them. */
   order: string[];
   /** Text written so far, keyed by path. */
@@ -40,6 +42,7 @@ const IDLE: GenerationStreamState = {
   assumptions: [],
   questions: [],
   thinkingChars: 0,
+  connected: true,
   order: [],
   drafts: {},
   logs: [],
@@ -47,7 +50,6 @@ const IDLE: GenerationStreamState = {
 
 export function useGenerationStream() {
   const [state, setState] = useState<GenerationStreamState>(IDLE);
-  const abortRef = useRef<AbortController>(null);
 
   const apply = useCallback((event: GenerationEvent) => {
     setState((current) => {
@@ -68,16 +70,6 @@ export function useGenerationStream() {
             questions: event.questions,
             activePath: undefined,
           };
-        case "job":
-          // Show the whole plan up front so the file list does not appear one
-          // entry at a time as each step starts.
-          return {
-            ...current,
-            order: event.files,
-            drafts: Object.fromEntries(event.files.map((path) => [path, ""])),
-          };
-        case "step-done":
-          return { ...current, activePath: undefined, thinkingChars: 0 };
         case "thinking":
           return { ...current, thinkingChars: event.chars };
         case "file-open":
@@ -112,9 +104,6 @@ export function useGenerationStream() {
 
   const start = useCallback(
     async (projectId: string, prompt: string, kind: "create" | "edit") => {
-      abortRef.current?.abort();
-      const controller = new AbortController();
-      abortRef.current = controller;
       setState({ ...IDLE, busy: true });
 
       const result = await runGeneration({
@@ -122,12 +111,14 @@ export function useGenerationStream() {
         prompt,
         kind,
         onEvent: apply,
-        signal: controller.signal,
+        onConnectionChange: (connected) =>
+          setState((current) => ({ ...current, connected })),
       });
 
       setState((current) => ({
         ...current,
         busy: false,
+        connected: true,
         error: result.ok ? undefined : (result.error ?? current.error),
       }));
       return result;
@@ -135,10 +126,7 @@ export function useGenerationStream() {
     [apply],
   );
 
-  const reset = useCallback(() => {
-    abortRef.current?.abort();
-    setState(IDLE);
-  }, []);
+  const reset = useCallback(() => setState(IDLE), []);
 
   return { state, start, reset };
 }
