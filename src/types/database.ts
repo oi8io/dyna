@@ -70,12 +70,6 @@ export interface GalleryItem {
   published_at: string;
 }
 
-/** Row shape returned by the `get_published_source` RPC. */
-export interface PublishedSourceFile {
-  path: string;
-  content: string;
-}
-
 export interface ProjectVersion {
   id: string;
   project_id: string;

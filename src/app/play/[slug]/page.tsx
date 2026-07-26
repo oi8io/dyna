@@ -3,10 +3,9 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { RemixButton } from "@/components/gallery/remix-button";
-import { SourceBrowser } from "@/components/gallery/source-browser";
 import { Badge } from "@/components/ui/badge";
 import { createClient } from "@/lib/supabase/server";
-import type { PublishedGame, PublishedSourceFile } from "@/types/database";
+import type { PublishedGame } from "@/types/database";
 
 async function loadPublication(slug: string) {
   const supabase = await createClient();
@@ -52,14 +51,9 @@ export default async function PublishedWorkPage({
     data: { user },
   } = await supabase.auth.getUser();
   const isOwner = user?.id === work.owner_id;
-  const isPublic = work.visibility === "public";
-
-  // Reads the frozen snapshot, not the author's live project files. Returns
-  // nothing when the publication is private.
-  const { data: sourceData } = isPublic
-    ? await supabase.rpc("get_published_source", { p_slug: slug })
-    : { data: null };
-  const files = (sourceData ?? []) as PublishedSourceFile[];
+  // Visibility now gates Remix only. Source is no longer browsable here; a
+  // remixer gets it by forking, where it lands in a project of their own.
+  const isRemixable = work.visibility === "public";
 
   return (
     <main className="mx-auto flex min-h-screen max-w-5xl flex-col px-5 py-8 lg:px-8">
@@ -78,7 +72,11 @@ export default async function PublishedWorkPage({
             <span className="text-xs text-ink-faint">
               发布于 {new Date(work.published_at).toLocaleDateString("zh-CN")}
             </span>
-            {isPublic ? <Badge>可 Remix</Badge> : <Badge variant="outline">仅试玩</Badge>}
+            {isRemixable ? (
+              <Badge>可 Remix</Badge>
+            ) : (
+              <Badge variant="outline">仅试玩</Badge>
+            )}
             {isOwner && <Badge variant="outline">你的作品</Badge>}
           </div>
         </div>
@@ -91,7 +89,7 @@ export default async function PublishedWorkPage({
             继续编辑
           </Link>
         ) : (
-          isPublic && <RemixButton slug={slug} signedIn={Boolean(user)} />
+          isRemixable && <RemixButton slug={slug} signedIn={Boolean(user)} />
         )}
       </div>
 
@@ -107,11 +105,9 @@ export default async function PublishedWorkPage({
         />
       </div>
 
-      {isPublic ? (
-        <SourceBrowser files={files} />
-      ) : (
+      {!isRemixable && (
         <p className="mt-6 rounded-lg border border-line bg-canvas-sunken px-4 py-3 text-sm leading-6 text-ink-soft">
-          作者没有公开这个作品的源码，所以它可以试玩但不能 Remix。
+          作者没有开放这个作品，所以它可以玩，但不能 Remix 成你自己的。
         </p>
       )}
     </main>

@@ -110,7 +110,7 @@ export function PublishPanel({
               updateVisibility(event.target.checked ? "public" : "private")
             }
           />
-          允许别人查看源码并 Remix
+          允许别人 Remix 成自己的作品
         </label>
       ) : (
         <label className="flex items-center gap-2 text-xs text-ink-soft">
@@ -120,7 +120,7 @@ export function PublishPanel({
             disabled={busy !== null}
             onChange={(event) => setAllowRemix(event.target.checked)}
           />
-          允许别人查看源码并 Remix
+          允许别人 Remix 成自己的作品
         </label>
       )}
 
