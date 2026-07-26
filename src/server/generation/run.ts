@@ -11,7 +11,7 @@ import {
 } from "@/server/build/imports";
 import { getServerEnv } from "@/server/env";
 import { getGameGenerationProvider } from "@/server/llm";
-import { planNeedsClarification } from "@/server/llm/plan";
+import { generationPlanSchema, planNeedsClarification } from "@/server/llm/plan";
 import {
   SPEC_PATH,
   appendChangelog,
@@ -26,6 +26,7 @@ import {
   extractAgentFiles,
   mergeAgentFiles,
   redactBuildLog,
+  validateAgentFiles,
   validateWorkspace,
 } from "@/server/workspace/schema";
 
@@ -43,6 +44,23 @@ export interface GenerationProject {
   current_version_id: string | null;
 }
 
+export type GenerationStage =
+  | "planning"
+  | "writing"
+  | "building"
+  | "saving"
+  | "succeeded"
+  | "failed";
+
+/** What a previous attempt already finished, loaded from the job row. */
+export interface GenerationCheckpoint {
+  stage: GenerationStage;
+  plan?: unknown;
+  draftFiles?: Record<string, string>;
+  draftArtifactHtml?: string;
+  attempts: number;
+}
+
 export interface ExecuteGenerationInput {
   supabase: SupabaseClient;
   project: GenerationProject;
@@ -50,6 +68,8 @@ export interface ExecuteGenerationInput {
   kind: "create" | "edit";
   /** Present only in live mode; demo runs reserve nothing. */
   jobId?: string;
+  /** Present when resuming a run that stopped part-way. */
+  checkpoint?: GenerationCheckpoint;
   emit: (event: GenerationEvent) => void;
 }
 
@@ -99,12 +119,44 @@ export async function executeGeneration({
   prompt,
   kind,
   jobId,
+  checkpoint,
   emit,
 }: ExecuteGenerationInput): Promise<void> {
   const env = getServerEnv();
   const startedAt = Date.now();
   const remainingMs = () =>
     env.GENERATION_DEADLINE_MS - (Date.now() - startedAt);
+
+  /**
+   * Commits what a stage produced, then advances to the next.
+   *
+   * One write for both, so a crash between them cannot leave a run claiming to
+   * have finished work whose output was never stored.
+   */
+  // Where the work has actually reached. A failure records this, not the stage
+  // the attempt started from, or resuming would redo everything it just did.
+  let currentStage: GenerationStage = checkpoint?.stage ?? "planning";
+
+  const checkpointAt = async (
+    stage: GenerationStage,
+    payload: {
+      plan?: unknown;
+      draftFiles?: Record<string, string>;
+      artifactHtml?: string;
+      error?: string;
+    } = {},
+  ) => {
+    currentStage = stage;
+    if (!jobId) return;
+    await supabase.rpc("checkpoint_generation", {
+      p_job_id: jobId,
+      p_stage: stage,
+      p_plan: payload.plan ?? null,
+      p_draft_files: payload.draftFiles ?? null,
+      p_artifact_html: payload.artifactHtml ?? null,
+      p_error: payload.error ?? null,
+    });
+  };
 
   let settled = false;
   const settle = async (
@@ -164,15 +216,28 @@ export async function executeGeneration({
     const provider = getGameGenerationProvider();
 
     // ---- Understand the request, or ask about it -------------------------
-    emit({ type: "phase", phase: "planning", message: "正在理解需求" });
-    const { plan } = await provider
-      .plan({
-        ...input,
-        timeoutMs: Math.min(PLAN_MAX_MS, remainingMs() - TAIL_RESERVE_MS),
-      })
-      .catch((error: unknown) => {
-        throw labelStage(error, "plan");
-      });
+    // A resumed run keeps the plan it already agreed. Re-planning would not
+    // only pay for the call twice, it would answer the same request differently
+    // and quietly replace the work the earlier stages already produced.
+    const storedPlan = checkpoint?.plan
+      ? generationPlanSchema.safeParse(checkpoint.plan)
+      : undefined;
+
+    let plan;
+    if (storedPlan?.success) {
+      plan = storedPlan.data;
+      emit({ type: "phase", phase: "planning", message: "沿用上次的计划" });
+    } else {
+      emit({ type: "phase", phase: "planning", message: "正在理解需求" });
+      ({ plan } = await provider
+        .plan({
+          ...input,
+          timeoutMs: Math.min(PLAN_MAX_MS, remainingMs() - TAIL_RESERVE_MS),
+        })
+        .catch((error: unknown) => {
+          throw labelStage(error, "plan");
+        }));
+    }
 
     if (planNeedsClarification(plan)) {
       // Nothing was built, so nothing is charged.
@@ -199,6 +264,7 @@ export async function executeGeneration({
         understanding: plan.understanding,
         questions: plan.questions,
       });
+      await checkpointAt("failed", { error: "needs_clarification" });
       return;
     }
 
@@ -213,19 +279,49 @@ export async function executeGeneration({
       assumptions: plan.assumptions,
     });
 
+    // The prompt travels with the plan so a later attempt can tell a retry of
+    // this request from a new instruction that happens to follow a failure.
+    await checkpointAt("writing", { plan: { ...plan, prompt } });
+
     // ---- Write every planned file in one pass ----------------------------
-    emit({ type: "phase", phase: "writing", message: "正在写代码" });
-    const written = await provider
-      .write({
-        ...input,
-        plan,
-        onProgress: emit,
-        timeoutMs: remainingMs() - TAIL_RESERVE_MS,
-      })
-      .catch((error: unknown) => {
-        throw labelStage(error, "write");
-      });
-    const changed = written.files;
+    // Files already produced by an earlier attempt are reused. Rewriting them
+    // would cost another call and return different code, so a build failure
+    // would keep changing the game instead of fixing it.
+    const resumedFiles = Object.entries(checkpoint?.draftFiles ?? {}).map(
+      ([path, content]) => ({ path, content }),
+    );
+    let changed: AgentFile[];
+    let providerName = "deepseek";
+
+    if (resumedFiles.length) {
+      changed = validateAgentFiles(resumedFiles) as AgentFile[];
+      emit({ type: "phase", phase: "writing", message: "沿用已写好的文件" });
+      for (const file of changed) {
+        emit({ type: "file-open", path: file.path });
+        emit({ type: "file-delta", path: file.path, text: file.content });
+        emit({ type: "file-close", path: file.path });
+      }
+    } else {
+      emit({ type: "phase", phase: "writing", message: "正在写代码" });
+      const written = await provider
+        .write({
+          ...input,
+          plan,
+          onProgress: emit,
+          timeoutMs: remainingMs() - TAIL_RESERVE_MS,
+        })
+        .catch((error: unknown) => {
+          throw labelStage(error, "write");
+        });
+      changed = written.files;
+      providerName = written.provider;
+    }
+
+    await checkpointAt("building", {
+      draftFiles: Object.fromEntries(
+        changed.map((file) => [file.path, file.content]),
+      ),
+    });
 
     // ---- Assemble, build, persist ----------------------------------------
     const previousAgentFiles = previousWorkspace
@@ -302,6 +398,7 @@ export async function executeGeneration({
       emit({ type: "log", level: entry.level, message: entry.message });
     }
 
+    await checkpointAt("saving", { artifactHtml: build.artifactHtml });
     emit({ type: "phase", phase: "saving", message: "正在保存" });
     const { data: version, error: versionError } = await supabase
       .from("project_versions")
@@ -351,8 +448,9 @@ export async function executeGeneration({
       }),
     ]);
 
+    await checkpointAt("succeeded");
     await settle("succeeded", 0.05, null);
-    emit({ type: "done", versionNumber, provider: written.provider });
+    emit({ type: "done", versionNumber, provider: providerName });
   } catch (error) {
     const errorDetail = generationErrorDetail(error);
     console.error("[generation_failed]", {
@@ -371,6 +469,11 @@ export async function executeGeneration({
         metadata: { error: true, detail: errorDetail },
       }),
     ]);
+    // The stage is left where it stopped, so the next attempt resumes there
+    // rather than restarting. Only the error and attempt count move.
+    await checkpointAt(currentStage, { error: errorDetail }).catch(
+      () => undefined,
+    );
     await settle("failed", 0, "generation_failed");
     emit({ type: "error", message: readableGenerationError(error) });
   }

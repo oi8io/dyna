@@ -4,6 +4,7 @@ import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { createDetachedClient } from "@/server/generation/client";
 import { startRun } from "@/server/generation/registry";
+import type { GenerationCheckpoint } from "@/server/generation/run";
 import { executeGeneration } from "@/server/generation/run";
 import { isLiveGenerationReady } from "@/server/env";
 
@@ -54,6 +55,37 @@ export async function POST(
     return NextResponse.json({ error: "项目不存在。" }, { status: 404 });
   }
 
+  // An earlier attempt that stopped part-way. Its plan and files are carried
+  // into this one, so a failure at the build step does not throw away a
+  // finished plan and a finished set of files — and does not answer the same
+  // request differently the second time.
+  const { data: previousJob } = await supabase
+    .from("generation_jobs")
+    .select("id, stage, plan, draft_files, draft_artifact_html, attempts")
+    .eq("project_id", project.id)
+    .not("stage", "in", '("succeeded","failed")')
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  // Only a retry of the same request may inherit it. A new instruction after a
+  // failure is a different question, and answering it with the old plan would
+  // build the thing the user just moved on from.
+  const storedPrompt = (previousJob?.plan as { prompt?: string } | null)?.prompt;
+  const isRetryOfSameRequest =
+    Boolean(previousJob) && storedPrompt === body.data.prompt;
+
+  const checkpoint: GenerationCheckpoint | undefined =
+    previousJob && isRetryOfSameRequest
+      ? {
+          stage: previousJob.stage as GenerationCheckpoint["stage"],
+          plan: previousJob.plan ?? undefined,
+          draftFiles: (previousJob.draft_files ?? {}) as Record<string, string>,
+          draftArtifactHtml: previousJob.draft_artifact_html ?? undefined,
+          attempts: (previousJob.attempts as number) ?? 0,
+        }
+      : undefined;
+
   // Reserved here rather than inside the run so the caller learns about an
   // exhausted budget as a status code, not as an event on a stream it has yet
   // to open.
@@ -95,6 +127,19 @@ export async function POST(
     }),
   ]);
 
+  if (previousJob && jobId && previousJob.id !== jobId) {
+    // Its work now belongs to this attempt; leaving it resumable would offer
+    // the same checkpoint twice.
+    await supabase.rpc("checkpoint_generation", {
+      p_job_id: previousJob.id,
+      p_stage: "failed",
+      p_plan: null,
+      p_draft_files: null,
+      p_artifact_html: null,
+      p_error: "已被新的尝试接管。",
+    });
+  }
+
   const { emit } = startRun(runId);
   // Detached on purpose. A long-lived process keeps this running after the
   // response is sent; the client reconnects to watch, or does not.
@@ -106,6 +151,7 @@ export async function POST(
     prompt: body.data.prompt,
     kind: body.data.kind,
     jobId,
+    checkpoint,
     emit,
   }).catch((error: unknown) => {
     console.error("[generation_crashed]", error);

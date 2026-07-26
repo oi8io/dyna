@@ -220,39 +220,97 @@ async function callDeepSeek(
 }
 
 /**
+ * How much source to inline before falling back to the manifest.
+ *
+ * Context is a budget, not a dumping ground. Every turn used to inline every
+ * file in full, so the prompt grew with the project and the oldest, least
+ * relevant code crowded out the request being answered.
+ */
+const SOURCE_BUDGET_CHARS = 60_000;
+
+/** Older turns are summarised down to their first line. */
+const RECENT_TURNS_IN_FULL = 6;
+const OLDER_TURN_CHARS = 120;
+
+function transcriptOf(history: PlanInput["history"]) {
+  const older = history.slice(0, -RECENT_TURNS_IN_FULL);
+  const recent = history.slice(-RECENT_TURNS_IN_FULL);
+  const line = (turn: PlanInput["history"][number], limit?: number) => {
+    const who = turn.role === "user" ? "User" : "Agent";
+    const text = limit
+      ? turn.content.replace(/\s+/g, " ").slice(0, limit)
+      : turn.content;
+    return `${who}: ${text}`;
+  };
+  return [
+    ...older.map((turn) => line(turn, OLDER_TURN_CHARS)),
+    ...recent.map((turn) => line(turn)),
+  ].join("\n");
+}
+
+/**
  * Builds the shared context block.
  *
- * The previous project used to be inlined as `JSON.stringify(...).slice(0, 60_000)`,
- * which cut the document mid-token and handed the model malformed JSON. Files
- * are listed as a manifest and included whole or not at all.
+ * `focusPaths` are the files the current step is about; they are worth their
+ * space. Everything else fills the remaining budget, and whatever does not fit
+ * appears in the manifest only — a name and a size is enough for the model to
+ * know a file exists and ask for nothing from it.
  */
-function contextBlock(input: PlanInput, includeSource: boolean) {
+function contextBlock(
+  input: PlanInput,
+  options: { includeSource: boolean; focusPaths?: string[] },
+) {
   const parts: string[] = [];
 
   parts.push(`Original brief:\n${input.originalPrompt}`);
 
   if (input.specMarkdown) {
+    // The distilled memory of the project: what it is for and what has already
+    // been decided. Always worth its space, however long the conversation gets.
     parts.push(`Recorded intent (${SPEC_PATH}):\n${input.specMarkdown}`);
   }
 
   if (input.history.length) {
-    const transcript = input.history
-      .map((turn) => `${turn.role === "user" ? "User" : "Agent"}: ${turn.content}`)
-      .join("\n");
-    parts.push(`Conversation so far:\n${transcript}`);
+    parts.push(`Conversation so far:\n${transcriptOf(input.history)}`);
   }
 
-  const agentFiles = input.previousWorkspace
-    ? extractAgentFiles(input.previousWorkspace)
-    : [];
+  const agentFiles = (
+    input.previousWorkspace ? extractAgentFiles(input.previousWorkspace) : []
+  ).filter((file) => file.path !== SPEC_PATH);
+
   if (agentFiles.length) {
     parts.push(`Current editable files:\n${describeManifest(agentFiles)}`);
-    if (includeSource) {
-      const source = agentFiles
-        .filter((file) => file.path !== SPEC_PATH)
-        .map((file) => `--- ${file.path} ---\n${file.content}`)
-        .join("\n\n");
-      parts.push(`Current source:\n${source}`);
+
+    if (options.includeSource) {
+      const focus = new Set(options.focusPaths ?? []);
+      const ordered = [
+        ...agentFiles.filter((file) => focus.has(file.path)),
+        ...agentFiles.filter((file) => !focus.has(file.path)),
+      ];
+
+      const included: string[] = [];
+      const omitted: string[] = [];
+      let spent = 0;
+      for (const file of ordered) {
+        const block = `--- ${file.path} ---\n${file.content}`;
+        // A focused file goes in whatever it costs: the step cannot do its job
+        // without it, and a truncated source file is worse than none.
+        if (focus.has(file.path) || spent + block.length <= SOURCE_BUDGET_CHARS) {
+          included.push(block);
+          spent += block.length;
+        } else {
+          omitted.push(file.path);
+        }
+      }
+
+      if (included.length) {
+        parts.push(`Current source:\n${included.join("\n\n")}`);
+      }
+      if (omitted.length) {
+        parts.push(
+          `Not shown to save space (unchanged, ask before assuming their contents):\n${omitted.join("\n")}`,
+        );
+      }
     }
   }
 
@@ -267,7 +325,7 @@ export class DeepSeekGameProvider implements GameGenerationProvider {
         { role: "system", content: PLAN_PROMPT },
         {
           role: "user",
-          content: `${contextBlock(input, false)}\n\nUser request (${input.kind}):\n${input.prompt}`,
+          content: `${contextBlock(input, { includeSource: false })}\n\nUser request (${input.kind}):\n${input.prompt}`,
         },
       ],
       // Comprehension plus a short JSON. Chain-of-thought buys nothing here and
@@ -309,7 +367,10 @@ export class DeepSeekGameProvider implements GameGenerationProvider {
       {
         role: "user",
         content: [
-          contextBlock(input, true),
+          contextBlock(input, {
+            includeSource: true,
+            focusPaths: input.plan.changes.map((change) => change.path),
+          }),
           `Agreed plan:\n${JSON.stringify(input.plan, null, 2)}`,
           `Write exactly these files:\n${wanted}`,
           `User request (${input.kind}):\n${input.prompt}`,
