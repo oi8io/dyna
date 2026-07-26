@@ -58,7 +58,12 @@ Rules:
 - On a CREATE there is nothing yet, so list the whole set.
 - Order them so later files can rely on earlier ones: game logic first, then components, then styling.
 - The entry point renders \`src/App.tsx\` and loads \`src/styles.css\`. When creating a project, "changes" MUST include both, or the result has no visible game.
-- "title" names the finished work in Chinese, under 20 characters. On an edit, keep the existing title unless the user asked to change it.
+- "title" is a NAME, not a description. Extract what the thing IS from the request and drop everything about what it should do. It appears in a sidebar, on a card and in a browser tab, so it has to read like a product name — Chinese, typically 2 to 8 characters, no verbs, no punctuation, never a sentence.
+  - "做一个蜘蛛纸牌，要有拖拽和难度选择" → "蜘蛛纸牌"
+  - "生成一个 2048，但数字是不同等级的行星" → "行星 2048"
+  - "做一个霓虹风格的打砖块，加入连击和粒子效果" → "霓虹打砖块"
+  - Never: "做一个蜘蛛纸牌，要有拖拽和难度选择"
+- On an edit, keep the existing title unchanged unless the user explicitly asked to rename it.
 
 ${BOUNDARIES}`;
 

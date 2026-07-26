@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { projectSpecSchema } from "@/server/llm/spec";
+import { normalizeTitle } from "@/server/llm/title";
 
 export const clarifyingQuestionSchema = z.object({
   question: z.string().min(1).max(300),
@@ -17,8 +18,19 @@ export const clarifyingQuestionSchema = z.object({
  */
 export const generationPlanSchema = z.object({
   understanding: z.string().min(1).max(800),
-  /** Names the work. Decided at plan time so no extra call is needed later. */
-  title: z.string().min(1).max(120).catch("未命名作品"),
+  /**
+   * Names the work. Decided at plan time so no extra call is needed later.
+   *
+   * Normalised rather than trusted: asked for a name, a model will sometimes
+   * answer with the request rephrased, and that ends up in the sidebar, the
+   * gallery card and the browser tab.
+   */
+  title: z
+    .string()
+    .min(1)
+    .max(120)
+    .transform((value) => normalizeTitle(value))
+    .catch("未命名作品"),
   changes: z
     .array(
       z.object({

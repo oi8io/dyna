@@ -2,13 +2,21 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { createClient } from "@/lib/supabase/server";
+import { normalizeTitle } from "@/server/llm/title";
 
 const createProjectSchema = z.object({
   prompt: z.string().trim().min(8).max(4000),
 });
 
-function titleFromPrompt(prompt: string) {
-  return prompt.replace(/\s+/g, " ").trim().slice(0, 60);
+/**
+ * A placeholder until the planner names the work properly.
+ *
+ * This used to be the request truncated to 60 characters, which put a whole
+ * sentence in the sidebar and the browser tab. The model gives it a real name
+ * a few seconds later; this only has to be less wrong than the raw request.
+ */
+function placeholderTitle(prompt: string) {
+  return normalizeTitle(prompt, "新作品");
 }
 
 export async function POST(request: Request) {
@@ -32,7 +40,7 @@ export async function POST(request: Request) {
     .from("projects")
     .insert({
       user_id: user.id,
-      title: titleFromPrompt(parsed.data.prompt),
+      title: placeholderTitle(parsed.data.prompt),
       original_prompt: parsed.data.prompt,
       status: "draft",
     })
