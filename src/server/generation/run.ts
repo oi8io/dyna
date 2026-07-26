@@ -40,6 +40,7 @@ const REPAIR_MIN_MS = 70_000;
 
 export interface GenerationProject {
   id: string;
+  title: string;
   original_prompt: string;
   current_version_id: string | null;
 }
@@ -340,7 +341,9 @@ export async function executeGeneration({
     const assemble = (files: AgentFile[]) => {
       const merged = mergeAgentFiles(previousAgentFiles, files);
       const workspace = createGameWorkspace({
-        title: plan.title,
+        // The project's name, not one derived from this turn. An edit changes
+        // the game, never what the game is called.
+        title: project.title,
         summary: plan.changeSummary,
         agentFiles: merged,
       });
@@ -430,11 +433,9 @@ export async function executeGeneration({
     await Promise.all([
       supabase
         .from("projects")
-        .update({
-          title: workspace.title,
-          status: "ready",
-          current_version_id: version.id,
-        })
+        // `title` is deliberately absent: it was decided when the project was
+        // created and every published card already carries it.
+        .update({ status: "ready", current_version_id: version.id })
         .eq("id", project.id),
       supabase.from("messages").insert({
         project_id: project.id,

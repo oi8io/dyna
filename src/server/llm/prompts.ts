@@ -9,6 +9,23 @@ const BOUNDARIES = `Platform boundaries (both stages):
 - No remote assets, no network, no storage, no cookies, no top navigation, no shell.
 - The runtime is React 19 + TypeScript, bundled by esbuild, rendered inside a sandboxed iframe.`;
 
+export const NAME_PROMPT = `Name the thing the user is describing.
+
+Return ONLY valid JSON: {"name":"string"}
+
+Rules:
+- A NAME, not a description. Extract what the thing IS and drop everything about what it should do.
+- Chinese, typically 2 to 8 characters. No verbs, no punctuation, never a sentence.
+- It appears in a sidebar, on a card and in a browser tab, and it stays the project's name through every later change — so name the work, not this one request.
+- If the request names a known genre, use it plainly.
+
+Examples:
+"做一个蜘蛛纸牌，要有拖拽和难度选择" → {"name":"蜘蛛纸牌"}
+"生成一个 2048，但数字是不同等级的行星" → {"name":"行星 2048"}
+"做一个霓虹风格的打砖块，加入连击和粒子效果" → {"name":"霓虹打砖块"}
+"我想玩那种在末日废土上开车撞僵尸的游戏" → {"name":"废土飙车"}
+"随便来个能打发时间的小游戏" → {"name":"消磨时光"}`;
+
 export const WRITE_PROMPT = `You are Dyna's web-game engineer. A plan has already been agreed. Write every file in it, in one response.
 
 Return ONLY valid JSON:
@@ -34,7 +51,6 @@ Return ONLY valid JSON:
   "understanding": "string",
   "changes": [{"path": "src/game/engine.ts", "intent": "string"}],
   "assumptions": ["string"],
-  "title": "string",
   "questions": [{"question": "string", "options": ["string", "string"]}],
   "spec": {
     "goal": "string",
@@ -58,12 +74,7 @@ Rules:
 - On a CREATE there is nothing yet, so list the whole set.
 - Order them so later files can rely on earlier ones: game logic first, then components, then styling.
 - The entry point renders \`src/App.tsx\` and loads \`src/styles.css\`. When creating a project, "changes" MUST include both, or the result has no visible game.
-- "title" is a NAME, not a description. Extract what the thing IS from the request and drop everything about what it should do. It appears in a sidebar, on a card and in a browser tab, so it has to read like a product name — Chinese, typically 2 to 8 characters, no verbs, no punctuation, never a sentence.
-  - "做一个蜘蛛纸牌，要有拖拽和难度选择" → "蜘蛛纸牌"
-  - "生成一个 2048，但数字是不同等级的行星" → "行星 2048"
-  - "做一个霓虹风格的打砖块，加入连击和粒子效果" → "霓虹打砖块"
-  - Never: "做一个蜘蛛纸牌，要有拖拽和难度选择"
-- On an edit, keep the existing title unchanged unless the user explicitly asked to rename it.
+- Do not name the project. It already has a name, chosen when it was created, and it does not change because of an edit.
 
 ${BOUNDARIES}`;
 

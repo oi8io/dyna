@@ -8,6 +8,7 @@ import type {
 } from "@/server/llm/types";
 import { generationPlanSchema } from "@/server/llm/plan";
 import {
+  NAME_PROMPT,
   PLAN_PROMPT,
   REPAIR_PROMPT,
   WRITE_PROMPT,
@@ -317,7 +318,31 @@ function contextBlock(
   return parts.join("\n\n");
 }
 
+const nameResponseSchema = z.object({ name: z.string().min(1).max(60) });
+
 export class DeepSeekGameProvider implements GameGenerationProvider {
+  async nameProject(prompt: string): Promise<string> {
+    const env = getServerEnv();
+    // Naming is comprehension of a single sentence: the fast model, no
+    // reasoning, and a short leash so project creation stays quick.
+    const { content } = await callDeepSeek(
+      [
+        { role: "system", content: NAME_PROMPT },
+        { role: "user", content: prompt },
+      ],
+      {
+        temperature: 0.2,
+        model: env.DEEPSEEK_PLAN_MODEL,
+        thinking: false,
+        timeoutMs: 15_000,
+      },
+    );
+    return nameResponseSchema.parse(
+      JSON.parse(stripCodeFence(content)) as unknown,
+    ).name;
+  }
+
+
   async plan(input: PlanInput): Promise<PlanResult> {
     const env = getServerEnv();
     const { content, usage } = await callDeepSeek(

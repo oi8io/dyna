@@ -42,3 +42,38 @@ describe("normalizeTitle", () => {
     expect(normalizeTitle("蜘蛛纸牌\n要能拖拽")).toBe("蜘蛛纸牌");
   });
 });
+
+/**
+ * The name is the project's, not a version's.
+ *
+ * It appears in the sidebar and on every published card, and it must not drift
+ * because someone asked for a faster ball. The planner is told not to name
+ * anything; these pin that down.
+ */
+describe("naming is separate from editing", () => {
+  it("the plan schema carries no title at all", async () => {
+    const { generationPlanSchema } = await import("@/server/llm/plan");
+    const plan = generationPlanSchema.parse({
+      understanding: "x",
+      title: "模型试图改名",
+    });
+    expect(plan).not.toHaveProperty("title");
+  });
+
+  it("the planner is told the project already has a name", async () => {
+    const { PLAN_PROMPT } = await import("@/server/llm/prompts");
+    expect(PLAN_PROMPT).toContain("Do not name the project");
+  });
+
+  it("naming asks for a name and shows what that means", async () => {
+    const { NAME_PROMPT } = await import("@/server/llm/prompts");
+    expect(NAME_PROMPT).toContain("A NAME, not a description");
+    expect(NAME_PROMPT).toContain("蜘蛛纸牌");
+  });
+
+  it("the demo provider can name a project too", async () => {
+    const { FakeGameProvider } = await import("@/server/llm/fake-provider");
+    const name = await new FakeGameProvider().nameProject("做一个蜘蛛纸牌");
+    expect(name.length).toBeGreaterThan(0);
+  });
+});

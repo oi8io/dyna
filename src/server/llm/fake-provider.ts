@@ -103,7 +103,6 @@ export class FakeGameProvider implements GameGenerationProvider {
           input.kind === "edit"
             ? `在现有作品上应用：${input.prompt}`
             : `新建一个作品：${input.prompt}`,
-        title: titleFromPrompt(input.prompt),
         // Ordered so later files can rely on earlier ones, matching what the
         // real planner is asked to produce.
         changes: [
@@ -133,6 +132,10 @@ export class FakeGameProvider implements GameGenerationProvider {
       model: "deterministic-plan-fixture-v1",
       usage: { inputTokens: 0, outputTokens: 0, estimatedCostUsd: 0 },
     };
+  }
+
+  async nameProject(prompt: string): Promise<string> {
+    return titleFromPrompt(prompt);
   }
 
   prebuiltArtifactHtml(input: PlanInput) {

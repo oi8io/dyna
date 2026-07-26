@@ -67,6 +67,14 @@ export interface PlanResult {
 }
 
 export interface GameGenerationProvider {
+  /**
+   * Extracts what the thing IS from a request describing it.
+   *
+   * Runs once, when the project is created, and the answer is the project's
+   * name from then on. Naming is comprehension, so it goes to the fast model
+   * and never reasons.
+   */
+  nameProject(prompt: string): Promise<string>;
   /** Stage one: decide what to do, or ask. Writes no code. */
   plan(input: PlanInput): Promise<PlanResult>;
   /**

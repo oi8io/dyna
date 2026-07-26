@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { createClient } from "@/lib/supabase/server";
+import { getGameGenerationProvider } from "@/server/llm";
 import { normalizeTitle } from "@/server/llm/title";
 
 const createProjectSchema = z.object({
@@ -9,14 +10,26 @@ const createProjectSchema = z.object({
 });
 
 /**
- * A placeholder until the planner names the work properly.
+ * Names the project once, at creation.
  *
- * This used to be the request truncated to 60 characters, which put a whole
- * sentence in the sidebar and the browser tab. The model gives it a real name
- * a few seconds later; this only has to be less wrong than the raw request.
+ * The name belongs to the project, not to a version: it is what appears in the
+ * sidebar and on every published card, and it must not drift because someone
+ * asked for a faster ball. Extraction is a comprehension task, so it goes to
+ * the model rather than to string surgery — a rule-based version only handles
+ * the openers it was taught, and "我想玩那种在末日废土上开车撞僵尸的游戏"
+ * has none of them.
+ *
+ * The heuristic remains as a fallback, so a naming outage costs a good name
+ * rather than the ability to create a project.
  */
-function placeholderTitle(prompt: string) {
-  return normalizeTitle(prompt, "新作品");
+async function nameProject(prompt: string) {
+  try {
+    const name = await getGameGenerationProvider().nameProject(prompt);
+    return normalizeTitle(name, "新作品");
+  } catch (error) {
+    console.error("[project_naming_failed]", error);
+    return normalizeTitle(prompt, "新作品");
+  }
 }
 
 export async function POST(request: Request) {
@@ -40,7 +53,7 @@ export async function POST(request: Request) {
     .from("projects")
     .insert({
       user_id: user.id,
-      title: placeholderTitle(parsed.data.prompt),
+      title: await nameProject(parsed.data.prompt),
       original_prompt: parsed.data.prompt,
       status: "draft",
     })

@@ -7,7 +7,6 @@ import { createGameWorkspace } from "@/server/template/game-template";
 export function planFixture(overrides: Partial<GenerationPlan> = {}) {
   return {
     understanding: "做一个可玩的打砖块。",
-    title: "霓虹打砖块",
     changes: [
       { path: "src/game/engine.ts", intent: "实现核心玩法循环" },
       { path: "src/App.tsx", intent: "渲染游戏外壳" },
@@ -61,7 +60,7 @@ export async function fakeWorkspaceFixture(prompt = "做一个霓虹风格打砖
   return {
     plan,
     workspace: createGameWorkspace({
-      title: plan.title,
+      title: "霓虹打砖块",
       summary: plan.changeSummary,
       agentFiles: files,
     }),

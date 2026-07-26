@@ -48,7 +48,7 @@ export async function POST(
 
   const { data: project } = await supabase
     .from("projects")
-    .select("id, user_id, original_prompt, current_version_id")
+    .select("id, user_id, title, original_prompt, current_version_id")
     .eq("id", params.data.id)
     .single();
   if (!project || project.user_id !== user.id) {
