@@ -29,15 +29,15 @@ export default async function NewProjectPage({
 
         <dl className="mt-10 grid gap-6 border-t border-line pt-8 sm:grid-cols-2">
           <div>
-            <dt className="text-sm font-medium text-ink">安全隔离</dt>
+            <dt className="text-sm font-medium text-ink">改坏了也不怕</dt>
             <dd className="mt-1.5 text-sm leading-6 text-ink-soft">
-              生成的代码读不到你的环境变量、其他项目文件或主站身份。
+              改砸了不会覆盖上一个能玩的版本，随时可以退回去。
             </dd>
           </div>
           <div>
-            <dt className="text-sm font-medium text-ink">版本可追溯</dt>
+            <dt className="text-sm font-medium text-ink">先玩再改</dt>
             <dd className="mt-1.5 text-sm leading-6 text-ink-soft">
-              每次修改都会生成新快照，失败不会覆盖上一个能跑的版本。
+              生成完就能直接上手玩，不满意就接着说，改到顺眼为止。
             </dd>
           </div>
         </dl>

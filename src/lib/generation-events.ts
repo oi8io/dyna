@@ -60,7 +60,7 @@ export const PHASE_LABELS: Record<GenerationPhase, string> = {
   reserving: "正在确认额度",
   planning: "正在理解需求",
   writing: "正在写代码",
-  building: "正在隔离构建",
-  repairing: "构建失败，正在修复",
-  saving: "正在保存版本",
+  building: "正在打包",
+  repairing: "出了点问题，正在修",
+  saving: "正在保存",
 };

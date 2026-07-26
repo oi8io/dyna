@@ -126,8 +126,8 @@ export function PublishPanel({
 
       <p className="max-w-xs text-right text-xs text-ink-faint">
         {slug
-          ? "已发布的链接永久有效；取消勾选会同时收回全部历史快照的 Remix 权限。"
-          : "未发布的作品不会出现在公共列表里。"}
+          ? "发出去的链接永久有效；取消勾选后，之前发出去的也一起收回。"
+          : "不发布就没人看得到。"}
       </p>
       {error && <p className="text-xs text-accent-hover">{error}</p>}
     </div>

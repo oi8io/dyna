@@ -436,7 +436,7 @@ export async function POST(
           });
         }
 
-        send({ type: "phase", phase: "building", message: "正在隔离构建" });
+        send({ type: "phase", phase: "building", message: "正在打包" });
         let build;
         try {
           if (unresolved.length) {
@@ -463,7 +463,7 @@ export async function POST(
           send({
             type: "phase",
             phase: "repairing",
-            message: `构建失败，正在修复 ${target.path}`,
+            message: `出了点问题，正在修 ${target.path}`,
           });
           const fixed = await provider
             .writeFile({
@@ -498,7 +498,7 @@ export async function POST(
           send({ type: "log", level: entry.level, message: entry.message });
         }
 
-        send({ type: "phase", phase: "saving", message: "正在保存版本" });
+        send({ type: "phase", phase: "saving", message: "正在保存" });
         const { data: version, error: versionError } = await supabase
           .from("project_versions")
           .insert({
@@ -508,7 +508,7 @@ export async function POST(
             source_snapshot: workspace,
             artifact_html: build.artifactHtml,
             build_log: [
-              { level: "info", message: "分步生成完成；隔离校验通过。" },
+              { level: "info", message: "生成完成，打包通过。" },
               ...build.logs,
             ],
           })

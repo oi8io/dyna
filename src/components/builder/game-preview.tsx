@@ -26,12 +26,7 @@ export function GamePreview({
   return (
     <section className="flex min-h-0 flex-1 flex-col overflow-hidden">
       <div className="flex h-11 shrink-0 items-center justify-between border-b border-line px-3">
-        <div className="flex items-center gap-2 text-xs text-ink-soft">
-          隔离预览
-          <span className="rounded bg-canvas-sunken px-1.5 py-0.5 font-mono text-[10px] text-ink-faint">
-            sandbox: scripts only
-          </span>
-        </div>
+        <div className="text-xs text-ink-soft">预览</div>
         <div className="flex gap-1">
           <Button
             variant="ghost"

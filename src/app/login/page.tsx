@@ -29,7 +29,7 @@ export default function LoginPage() {
           </div>
         </Card>
         <p className="mt-5 text-center text-xs text-ink-faint">
-          登录只申请身份验证所需权限
+          登录后作品会存在你的账户里
         </p>
       </div>
     </main>

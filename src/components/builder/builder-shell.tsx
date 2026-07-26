@@ -218,7 +218,7 @@ export function BuilderShell({
             </Badge>
           </div>
           <p className="text-xs text-ink-faint">
-            每次修改都会创建不可变版本；预览无法访问主站数据或网络。
+            改砸了不要紧，上一个能玩的版本一直留着。
           </p>
         </div>
         {hasVersion && (
@@ -389,9 +389,7 @@ export function BuilderShell({
 
                     {failure.detail && (
                       <div>
-                        <p className="mb-1.5 text-xs text-ink-faint">
-                          详细报错（已脱敏）
-                        </p>
+                        <p className="mb-1.5 text-xs text-ink-faint">详细报错</p>
                         <pre className="scrollbar-thin max-h-64 overflow-auto rounded-lg border border-line bg-canvas-sunken p-3 text-[11px] leading-5 text-ink-soft">
                           <code>{failure.detail}</code>
                         </pre>

@@ -43,7 +43,7 @@ export default async function ArtifactsPage() {
       <div className="mb-10 border-b border-line pb-8">
         <h1 className="font-serif text-3xl tracking-tight text-ink">已发布</h1>
         <p className="mt-2 text-sm leading-6 text-ink-soft">
-          每次发布都会生成一份不可变快照。旧链接永久有效，首页画廊只显示每个作品最新的一份。
+          发出去的链接永久有效，之后怎么改都不会影响它。首页只展示每个作品最新的那一版。
         </p>
       </div>
 
