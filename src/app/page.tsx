@@ -98,7 +98,7 @@ export default async function HomePage() {
               大家做的东西
             </h2>
             <p className="text-sm text-ink-soft">
-              点开就能玩，公开源码的作品可以 Remix 成你自己的
+              点开就能玩，作者开放的作品可以 Remix 成你自己的
             </p>
           </div>
           <Suspense

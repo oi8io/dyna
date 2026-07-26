@@ -15,7 +15,7 @@ The demo is a product prototype, not a static mockup and not a general-purpose a
 - Confirmed product requirements exist in `docs/PRD.md`.
 - The technical baseline and execution plan exist in `docs/IMPLEMENTATION_PLAN.md`.
 - The live task board exists in `docs/TASKS.md`.
-- The original challenge is in `docs/【请创建副本后使用】ROOT 全栈岗位笔试.md`.
+- The original challenge brief is in `docs/`, git-ignored and confidential.
 - The approved direction is:
   - Next.js App Router and TypeScript for the platform;
   - Tailwind and a small shadcn/ui set for product UI;
@@ -36,7 +36,7 @@ Resolve conflicts in this order:
 2. `docs/PRD.md`.
 3. `docs/IMPLEMENTATION_PLAN.md`.
 4. `docs/TASKS.md` for current ownership and status only.
-5. `docs/【请创建副本后使用】ROOT 全栈岗位笔试.md`.
+5. The confidential challenge brief in `docs/`.
 6. This `AGENTS.md`.
 
 The original challenge document is confidential. Do not publish or reproduce it outside the requested submission workflow.

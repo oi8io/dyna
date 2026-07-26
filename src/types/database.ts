@@ -21,7 +21,7 @@ export type JobStatus =
   | "cancelled";
 export type VersionStatus = "draft" | "runnable" | "failed";
 export type MessageRole = "user" | "assistant" | "system";
-/** Gates SOURCE only. A private publication is still playable by anyone. */
+/** Gates REMIX only. A private publication is still playable by anyone. */
 export type WorkVisibility = "public" | "private";
 
 export interface Profile {

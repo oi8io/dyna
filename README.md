@@ -1,39 +1,88 @@
 # Dyna Studio
 
-Dyna Studio 是一个 Web 作品生成器：用户登录后，用一句话生成真实的 React/TypeScript 工程，立即试玩、继续对话修改，并发布公开链接。首个品类是网页小游戏，后续会扩展到海报、动画、短剧和网页。
+**English** · [简体中文](README.zh-CN.md)
 
-默认使用零成本 `fake` 模式。它仍会创建项目、保存多文件源码、生成版本、运行安全校验、展示可玩产物并发布快照。切换到 `live` 后，同一链路会调用 DeepSeek 并真实构建源码。
+**Live: <https://dyna.oio.sale>**
 
-## 已实现
+Dyna Studio turns one sentence into a real React/TypeScript project. Sign in, describe what you want, play it immediately, keep changing it by talking to it, then publish a public link. The first category is browser games; animation, short-form video, design and web pages come next.
 
-- Google OAuth 与邮箱 Magic Link 登录入口
-- Supabase 项目、消息、源码、版本、用量和发布快照模型
-- RLS 所有权隔离
-- 一句话创建、自然语言修改和失败恢复
-- 两阶段生成：先出计划，需求含糊时停下来问（不消耗额度），确认后才写代码
-- `SPEC.md` 记录作品意图与已做决定，随版本、发布和 Remix 传递
-- 编辑只重写改动的文件，构建失败自动带着编译错误重试一次
-- React/TypeScript 多文件模板与只读源码浏览
-- Fake/DeepSeek Provider Adapter
-- 进程内 esbuild 构建器（Vercel 上可选 Sandbox microVM）
-- 文件白名单、路径穿越防护、体积和远程资源限制
-- 原子额度预占、幂等、全局预算、并发和速率限制
-- `iframe sandbox="allow-scripts"` 隔离预览
-- CSP、日志脱敏和开放重定向防护
-- 不可变公开试玩链接（发布后永久有效）
-- 首页画廊只展示已发布作品；未发布的项目完全私有
-- 已发布作品的只读源码浏览与一键 Remix，Remix 复制的是发布时的快照
-- 发布时可选择是否允许别人查看源码并 Remix，事后可随时收回
+The zero-cost `fake` mode is the default. It still creates projects, stores multi-file source, cuts versions, runs the security checks, renders a playable artifact and publishes snapshots. Switch to `live` and the exact same pipeline calls DeepSeek and really builds the source.
 
-## 技术栈
 
-Next.js 16、React 19、TypeScript、Tailwind CSS 4、shadcn 风格组件、shiki、Supabase、DeepSeek、Vitest 和 esbuild，部署在 Railway 的常驻 Node 进程上。
+## What works today
 
-生成过程通过 SSE 实时推送：模型每写出一段代码，Builder 的只读编辑器就同步显示，并自动切到正在写的文件。
+**Generation pipeline**
 
-## 本地启动
+- Create from one sentence, edit in natural language, recover from failure
+- A flash model distills the project name at creation time; the name is decoupled from per-version requests, so no later edit ever renames it
+- Two-stage generation: plan first, stop and ask when the request is ambiguous (free of charge), write code only after you confirm
+- All files are written in a single call, so files can't contradict each other the way per-file writes do
+- `SPEC.md` records intent and settled decisions, and travels with versions, publications and remixes
+- Edits rewrite only the changed files; a failed build automatically retries once carrying the compiler errors
 
-要求 Node.js 22+ 和 pnpm 9+。
+**Reliability**
+
+- Generation outlives the HTTP connection — closing the browser doesn't kill the job
+- SSE reconnects on its own and replays missed events via `Last-Event-ID` instead of regenerating
+- Checkpoints per stage (plan / draft / build / publish); a failure resumes from the latest checkpoint
+- Context budgeting and compaction, so long conversations don't blow the window
+- Leaked credit reservations are reclaimed by `reap_stale_generations`
+
+**Accounts and data**
+
+- Google OAuth (built to Google's own branding spec) and email magic links
+- Supabase model for projects, messages, source, versions, usage and publication snapshots
+- Ownership isolation through RLS
+
+**Build and security**
+
+- In-process esbuild builder (optional Sandbox microVM on Vercel)
+- File allowlist, path-traversal protection, size and remote-asset limits
+- Atomic credit reservation, idempotency, a global budget, concurrency and rate limits
+- Preview isolated in `iframe sandbox="allow-scripts"`
+- CSP, log redaction and open-redirect protection
+
+**Publishing and sharing**
+
+- Immutable public play links that stay valid forever once published
+- The home gallery shows published work only; unpublished projects stay fully private
+- One-click remix copies the snapshot as published, not the author's current version
+- Remixing can be allowed or denied at publish time, and revoked later
+
+## Stack
+
+Next.js 16, React 19, TypeScript, Tailwind CSS 4, shadcn-style components, shiki, Supabase, DeepSeek, Vitest and esbuild, deployed on a long-lived Node process on Railway.
+
+Generation streams over SSE: every chunk the model writes shows up in the Builder's read-only editor, which follows along to whichever file is being written.
+
+## Roadmap
+
+Four things, and they form a causal chain rather than four parallel features:
+
+```
+More categories   animation / short video / design / web, plus a category concept
+   ↓              more categories means more compute demand
+Worker queue      generation is scheduled instead of started on arrival
+   ↓              once there's a queue, "skip the queue" is something you can sell
+Pro / Plus plans  paying users are scheduled first
+   ↓              demand beyond what a plan covers
+Credits & top-up  billed against real token consumption
+```
+
+**The queue isn't a performance optimization. It's the precondition for the business model.**
+
+**More categories.** The engine never assumed the artifact is a game — the checkpoint state machine, SSE reconnection, context compaction, build, credits, CSP isolation, publishing and remix are all category-agnostic. Only four things are coupled to games: the project skeleton, the writable-path allowlist, the domain vocabulary in the prompt, and the artifact self-check probe. So the way to extend is **to add a recipe, not a branch**: each category is a `Recipe` declaring its own template, allowlist, domain prompt fragment and success criteria, with zero engine changes. The category is decided by the same flash call that distills the name, can be overridden by the user, and — like the name — is fixed at creation and never changes across versions.
+
+**Worker queue.** Today generation starts on arrival with no concurrency control. The plan is a Postgres queue using `FOR UPDATE SKIP LOCKED` rather than introducing Redis — checkpoints and credit reservations already live in that same database, and an external queue would split off a second source of truth. A lease mechanism lets a crashed worker's job return to the queue, and whoever picks it up resumes from the checkpoint instead of starting over.
+
+**Plans and credits.** Priority *is* the plan, with aging so free users don't starve — what you buy is a shorter wait, not an indefinite cut in line. Credits move from "number of runs" to "actual token consumption", and `generation_jobs` already carries `input_tokens` / `output_tokens` / `reserved_usd` / `final_usd`, so what changes is the unit of pricing, not the billing architecture.
+
+Known hard part: success criteria are much weaker outside games — a poster with bad composition and an animation with bad pacing both pass a build check. Until that's solved, new categories won't be marked as supported.
+
+
+## Running locally
+
+Requires Node.js 22+ and pnpm 9+.
 
 ```bash
 pnpm install
@@ -41,11 +90,20 @@ cp .env.example .env.local
 pnpm dev
 ```
 
-打开 `http://localhost:3000`。所有变量记录在 `.env.example`；真实密钥只放 `.env.local` 或部署平台的服务端环境变量。
+Open `http://localhost:3000`. Every variable is documented in `.env.example`; real secrets belong only in `.env.local` or your host's server-side environment.
 
-## Supabase 初始化
+## Supabase setup
 
-Schema 位于 `supabase/migrations/`：`202607240001_initial_schema.sql` 建基础模型，`202607250001_visibility_and_remix.sql` 加可见性、画廊与 Remix，`202607250002_remix_carries_spec.sql` 让 Remix 继承发布快照中的作品意图。
+The schema lives in `supabase/migrations/` and all of it must be applied, in order:
+
+| Migration | Purpose |
+| --- | --- |
+| `202607240001_initial_schema` | Core model, RLS, credit RPCs |
+| `202607250001_visibility_and_remix` | Visibility, gallery and remix |
+| `202607250002_remix_carries_spec` | Remix inherits intent from the publication snapshot |
+| `202607250003_reap_stale_generations` | Reclaims credits leaked by dead jobs |
+| `202607250004_split_generation_steps` | Plan and draft persist separately |
+| `202607250005_resumable_generations` | Generation becomes a resumable checkpoint state machine |
 
 ```bash
 pnpm dlx supabase link --project-ref <project-ref>
@@ -53,7 +111,7 @@ pnpm dlx supabase db push --dry-run
 pnpm dlx supabase db push
 ```
 
-迁移后，在 SQL Editor 设置已经确认的额度。下列占位符必须替换：
+After migrating, set your confirmed limits in the SQL Editor. Every placeholder below must be replaced:
 
 ```sql
 update public.app_budget
@@ -65,64 +123,65 @@ set
 where singleton = true;
 ```
 
-环境变量中的 `APP_PUBLIC_BUDGET_USD`、`APP_NEW_USER_CREATE_LIMIT`、`APP_NEW_USER_EDIT_LIMIT` 应使用相同值。Google 登录还需在 Supabase Auth Providers 中配置 OAuth Client，并把本地和生产地址的 `/auth/callback` 加入 Redirect URL。
+`APP_PUBLIC_BUDGET_USD`, `APP_NEW_USER_CREATE_LIMIT` and `APP_NEW_USER_EDIT_LIMIT` in your environment must carry the same values. Google sign-in additionally needs an OAuth client configured under Supabase Auth Providers, with both your local and production `/auth/callback` URLs added to the redirect list.
 
-## 生成模式
+## Generation modes
 
-安全默认值：
+Safe defaults:
 
 ```text
 AI_PROVIDER_MODE=fake
 APP_GENERATION_ENABLED=false
 ```
 
-Live 模式只有同时满足以下条件才会启用：
+Live mode turns on only when all of the following hold:
 
-- `AI_PROVIDER_MODE=live` 与 `APP_GENERATION_ENABLED=true`
-- 三个预算／额度环境变量均为正数
-- DeepSeek Key 已配置
-- 数据库 `app_budget.generation_enabled=true`
+- `AI_PROVIDER_MODE=live` and `APP_GENERATION_ENABLED=true`
+- All three budget/credit environment variables are positive
+- A DeepSeek key is configured
+- `app_budget.generation_enabled=true` in the database
 
-构建器由 `BUILD_EXECUTOR` 指定：`local` 用进程内 esbuild（任何主机可用），`sandbox` 用 Vercel microVM（仅 Vercel）。
+The builder is selected by `BUILD_EXECUTOR`: `local` uses in-process esbuild and runs on any host, `sandbox` uses a Vercel microVM and is Vercel-only.
 
-## 安全模型
+## Security model
 
-- Agent 只能写 `src/App.tsx`、`src/styles.css`、`src/game/**`、`src/components/game/**` 和 `README.md`。
-- 依赖、入口、构建脚本、CSP 和 TypeScript 配置由平台锁定。
-- Sandbox 安装固定依赖后关闭网络再构建，且不接收任何生产密钥。
-- Preview 只有脚本权限，没有同源、导航、弹窗或下载权限。
-- 生成 HTML 必须通过严格 CSP 和远程资源扫描。
-- 产品不向用户暴露 Terminal。
+- The agent may only write `src/App.tsx`, `src/styles.css`, `src/game/**`, `src/components/game/**` and `README.md`.
+- Dependencies, entry point, build scripts, CSP and TypeScript config are locked by the platform.
+- The sandbox installs pinned dependencies, then drops the network before building, and never receives production secrets.
+- Preview gets scripts only — no same-origin, no navigation, no popups, no downloads.
+- Generated HTML must pass a strict CSP and a remote-asset scan.
+- The product never exposes a terminal to users.
 
-## 验证
+## Verification
 
 ```bash
 pnpm check
 ```
 
-它会执行 TypeScript、ESLint、Vitest 和生产构建。测试覆盖路径穿越、模板越权、CSP 绕过、远程资源、开放重定向和 Fake 工程源码编译。
+This runs TypeScript, ESLint, Vitest and a production build. Tests cover path traversal, template escape, CSP bypass, remote assets, open redirects, and compilation of the fake project's source.
 
-## 目录
+## Layout
 
 ```text
-src/app/                 页面与 Route Handlers
-src/app/(app)/           登录后的工作区（共用左侧栏）
-src/components/layout/   应用外壳、侧栏与用户卡片
-src/components/builder/  Builder、Preview、恢复状态
-src/server/llm/          Fake/DeepSeek Provider
-src/server/template/     锁定游戏工程模板
-src/server/workspace/    文件边界与日志脱敏
-src/server/build/        Inline/Sandbox 构建器
-supabase/migrations/     Schema、RLS、额度 RPC
-docs/                    PRD、实施计划、任务板与演示脚本
+src/app/                 Pages and Route Handlers
+src/app/(app)/           Signed-in workspace (shared sidebar)
+src/components/layout/   App shell, sidebar and user card
+src/components/builder/  Builder, Preview, recovery states
+src/server/llm/          Fake/DeepSeek providers and prompts
+src/server/generation/   Checkpoint state machine, run registry, SSE stream
+src/server/template/     Locked game project template
+src/server/workspace/    File boundaries and log redaction
+src/server/build/        Inline/Sandbox builders
+supabase/migrations/     Schema, RLS, credit RPCs
 ```
 
-## 尚需外部控制台完成
+## External setup required to deploy your own
 
-- 应用数据库迁移
-- 配置 Google OAuth 与 Redirect URL
-- 确认公共预算和新用户额度
-- 在 Railway 配置环境变量并绑定域名
-- 创建 GitHub 远端、推送并部署
+The code runs out of the box — `fake` mode needs no keys at all. Running `live` requires work in the respective consoles:
 
-这些步骤涉及真实外部项目，仓库不会擅自使用默认额度或自动部署。
+- Apply every migration under `supabase/migrations/`
+- Configure the Google OAuth client and redirect URLs in Supabase Auth
+- Set the public budget and new-user credits in the SQL Editor
+- Configure environment variables and bind a domain on your host
+
+The repository will not assume default limits or deploy anything on your behalf — budgets and keys belong to real external projects, and the person deploying has to confirm them explicitly.

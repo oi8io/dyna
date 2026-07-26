@@ -35,7 +35,9 @@ simple/
 # Generated project analysis
 graphify-out/
 
-# Internal planning and confidential source material
+# Internal planning and confidential source material.
+# docs/ is private in full — the write-up is delivered out of band, and PRD.md
+# quotes the confidential brief at length. Nothing under docs/ is published.
 docs/
 # Logs and operating-system files
 *.log
