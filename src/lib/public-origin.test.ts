@@ -40,13 +40,15 @@ describe("resolvePublicOrigin", () => {
     ).toBe("https://dyna.up.railway.app");
   });
 
-  it("takes the client-most entry when proxies chained the header", () => {
+  it("trusts the nearest proxy, not what the client claimed", () => {
     delete process.env.NEXT_PUBLIC_APP_URL;
+    // A client can put anything in the first entry; the proxy appends the real
+    // one. Reading the first would let a request choose its own redirect target.
     expect(
       resolvePublicOrigin(
         requestWith("http://localhost:8080/x", {
-          "x-forwarded-host": "dyna.example.com, internal.proxy",
-          "x-forwarded-proto": "https, http",
+          "x-forwarded-host": "attacker.example.net, dyna.example.com",
+          "x-forwarded-proto": "http, https",
         }),
       ),
     ).toBe("https://dyna.example.com");
