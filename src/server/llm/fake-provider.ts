@@ -6,6 +6,8 @@ import type {
   WriteFileInput,
   WriteFileResult,
 } from "@/server/llm/types";
+import type { AgentFile } from "@/server/workspace/schema";
+import { validateAgentFiles } from "@/server/workspace/schema";
 
 /** Roughly a fast model's output rate, so demo mode feels like the real thing. */
 const REPLAY_CHARS_PER_TICK = 220;
@@ -140,10 +142,14 @@ export class FakeGameProvider implements GameGenerationProvider {
   async writeFile(input: WriteFileInput): Promise<WriteFileResult> {
     const title = titleFromPrompt(input.prompt);
     const fixture = fakeAgentFiles(title, input.prompt);
-    const file = fixture.find((entry) => entry.path === input.path) ?? {
+    const candidate = fixture.find((entry) => entry.path === input.path) ?? {
       path: input.path,
       content: `// ${input.path}\n// ${input.intent}\n`,
     };
+
+    // The same boundary the live provider enforces. Demo mode must not be able
+    // to produce a workspace that live mode would reject.
+    const [file] = validateAgentFiles([candidate]) as AgentFile[];
 
     if (input.onProgress) await replayFile(file, input.onProgress);
 

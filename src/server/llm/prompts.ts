@@ -15,7 +15,8 @@ Return ONLY valid JSON:
 {"files":[{"path":"<the requested path>","content":"string"}]}
 
 Rules:
-- Write the single file you were asked for. Do not return any other file.
+- Write the single file you were asked for, and only that one. Every other file in your response is discarded unread, so including them wastes your output budget and buys nothing.
+- The remaining files each get their own turn. You are not being asked to finish the project here.
 - Return its COMPLETE contents. Never a patch, never an ellipsis, never "unchanged" placeholders.
 - Files already written in this run are shown to you. Match their exports, imports, prop shapes, CSS class names and behaviour exactly — they are already committed and will not be revisited.
 - Files not yet written are listed with their intent. Write against that intent so the pieces fit.

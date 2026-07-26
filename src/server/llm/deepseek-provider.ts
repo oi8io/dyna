@@ -24,9 +24,23 @@ import {
 } from "@/server/workspace/schema";
 import { z } from "zod";
 
-const writeResponseSchema = z.object({
-  files: z.array(z.unknown()).min(1).max(4),
-});
+/**
+ * Tolerant on purpose.
+ *
+ * The step asks for one file, and the caller picks the requested path out of
+ * whatever comes back — so a model that returns the whole project is merely
+ * verbose, not wrong. A tight bound here turned that into a hard failure and
+ * threw away a response that contained exactly what was needed.
+ *
+ * Also accepts a bare `{path, content}`, which is the other shape models reach
+ * for when asked for a single file.
+ */
+const writeResponseSchema = z.union([
+  z.object({ files: z.array(z.unknown()).min(1).max(32) }),
+  z
+    .object({ path: z.string(), content: z.string() })
+    .transform((file) => ({ files: [file] as unknown[] })),
+]);
 
 function stripCodeFence(value: string) {
   return value
@@ -364,9 +378,15 @@ export class DeepSeekGameProvider implements GameGenerationProvider {
       timeoutMs: input.timeoutMs,
     });
 
-    const generated = writeResponseSchema.parse(
+    const parsed = writeResponseSchema.safeParse(
       JSON.parse(stripCodeFence(content)) as unknown,
     );
+    if (!parsed.success) {
+      throw new Error(
+        `模型返回的结构无法解析（${input.path}）：${parsed.error.issues[0]?.message ?? "unknown"}`,
+      );
+    }
+    const generated = parsed.data;
 
     // The model was asked for one specific path. Take that one if present and
     // ignore anything else it decided to include.
