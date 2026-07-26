@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { fakeWorkspaceFixture } from "@/server/llm/test-fixtures";
+import { createGameWorkspace } from "@/server/template/game-template";
 import { validateStandaloneHtml } from "@/server/build/validation";
 import { buildWorkspaceLocally } from "./local-esbuild";
 
@@ -13,6 +14,26 @@ describe("local esbuild executor", () => {
     expect(result.executor).toBe("local-esbuild");
     expect(result.artifactHtml).toContain("<script>");
     expect(result.artifactHtml).toContain("<style>");
+    expect(() => validateStandaloneHtml(result.artifactHtml)).not.toThrow();
+  });
+
+  it("still bundles when the plan produced neither App nor styles", async () => {
+    // The planner is free to choose file names. A run that only wrote a
+    // component used to leave the platform's entry point importing files that
+    // did not exist, which no repair pass could fix.
+    const workspace = createGameWorkspace({
+      title: "只有组件",
+      summary: "s",
+      agentFiles: [
+        {
+          path: "src/components/game/Board.tsx",
+          content: "export default function Board() { return null; }",
+        },
+      ],
+    });
+
+    const result = await buildWorkspaceLocally(workspace);
+    expect(result.artifactHtml).toContain("<script>");
     expect(() => validateStandaloneHtml(result.artifactHtml)).not.toThrow();
   });
 

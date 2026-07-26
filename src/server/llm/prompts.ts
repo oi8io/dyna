@@ -54,6 +54,7 @@ Rules:
 - "spec" is the FULL updated intent spec, not a patch. Carry forward everything from the existing spec that the user has not contradicted. Losing a previously recorded constraint is a bug.
 - Record durable reasoning in "spec.decisions". Record this turn's edit in "changeSummary", one sentence.
 - Keep "changes" to the files you will actually touch. Each one becomes its own generation step, so order them so that later files can rely on earlier ones: game logic first, then components, then styling.
+- The entry point renders \`src/App.tsx\` and loads \`src/styles.css\`. When creating a project, "changes" MUST include both, or the result has no visible game. On an edit, include them only if they actually change.
 - "title" names the finished work in Chinese, under 20 characters. On an edit, keep the existing title unless the user asked to change it.
 
 ${BOUNDARIES}`;

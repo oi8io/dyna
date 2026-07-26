@@ -86,14 +86,60 @@ createRoot(document.getElementById("root")!).render(<React.StrictMode><App /></R
   },
 ];
 
+/**
+ * Stand-ins for the two files `src/main.tsx` imports by name.
+ *
+ * The entry point is platform-owned, so the platform has to guarantee it
+ * resolves. Leaving that to the agent meant a plan that happened not to list
+ * `src/App.tsx` — say, because it decided on a component file instead —
+ * produced a workspace whose entry point referenced nothing, and no amount of
+ * repair could recover it.
+ *
+ * Anything the agent writes replaces these. They exist so that a build is
+ * always possible, not so that anyone ships them.
+ */
+const FALLBACK_FILES: GeneratedWorkspace["files"] = [
+  {
+    path: "src/App.tsx",
+    content: `export default function App() {
+  return (
+    <main className="game-shell">
+      <h1>还没有内容</h1>
+      <p>这一版没有生成游戏主体，继续对话再试一次。</p>
+    </main>
+  );
+}
+`,
+  },
+  {
+    path: "src/styles.css",
+    content: `.game-shell {
+  display: grid;
+  place-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 100%;
+  font: 14px system-ui;
+  text-align: center;
+}
+`,
+  },
+];
+
 export function createGameWorkspace(input: {
   title: string;
   summary: string;
   agentFiles: GeneratedWorkspace["files"];
 }) {
+  // Later entries win, and duplicates would fail validation outright.
+  const byPath = new Map<string, GeneratedWorkspace["files"][number]>();
+  for (const file of [...TEMPLATE_FILES, ...FALLBACK_FILES, ...input.agentFiles]) {
+    byPath.set(file.path, file);
+  }
+
   return validateWorkspace({
     title: input.title,
     summary: input.summary,
-    files: [...TEMPLATE_FILES, ...input.agentFiles],
+    files: [...byPath.values()],
   });
 }
