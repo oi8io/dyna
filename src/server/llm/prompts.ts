@@ -54,8 +54,10 @@ Rules:
 - If you ask anything, leave "changes" empty: nothing will be built this turn.
 - "spec" is the FULL updated intent spec, not a patch. Carry forward everything from the existing spec that the user has not contradicted. Losing a previously recorded constraint is a bug.
 - Record durable reasoning in "spec.decisions". Record this turn's edit in "changeSummary", one sentence.
-- Keep "changes" to the files you will actually touch. Each one becomes its own generation step, so order them so that later files can rely on earlier ones: game logic first, then components, then styling.
-- The entry point renders \`src/App.tsx\` and loads \`src/styles.css\`. When creating a project, "changes" MUST include both, or the result has no visible game. On an edit, include them only if they actually change.
+- On an EDIT, this is a continuing conversation about a project that already exists and already works. List ONLY the files whose contents genuinely have to differ afterwards. A request to speed the ball up touches the game logic, not the stylesheet, not the README. Every file you list gets rewritten from scratch, so listing one you did not need is how a working part of the project silently changes.
+- On a CREATE there is nothing yet, so list the whole set.
+- Order them so later files can rely on earlier ones: game logic first, then components, then styling.
+- The entry point renders \`src/App.tsx\` and loads \`src/styles.css\`. When creating a project, "changes" MUST include both, or the result has no visible game.
 - "title" names the finished work in Chinese, under 20 characters. On an edit, keep the existing title unless the user asked to change it.
 
 ${BOUNDARIES}`;

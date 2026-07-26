@@ -1,27 +1,74 @@
 "use client";
 
 import { Maximize2, RefreshCw } from "lucide-react";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
+
+type PreviewHealth =
+  | { kind: "pending" }
+  | { kind: "ok" }
+  | { kind: "empty" }
+  | { kind: "error"; message: string };
+
+interface PreviewMessage {
+  source?: string;
+  kind?: string;
+  message?: string;
+}
 
 export function GamePreview({
   artifactHtml,
   title,
+  onRetry,
 }: {
   artifactHtml: string;
   title: string;
+  /** Offered when the game failed to run, so the user has a way forward. */
+  onRetry?: (instruction: string) => void;
 }) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [revision, setRevision] = useState(0);
+  const [health, setHealth] = useState<PreviewHealth>({ kind: "pending" });
+
+  // The artifact reports on itself. The iframe is sandboxed without
+  // allow-same-origin, so nothing here can read into it — a script in the
+  // platform-owned shell posts out instead. Without this a game that throws on
+  // mount is indistinguishable from one that is still loading.
+  useEffect(() => {
+    function onMessage(event: MessageEvent<PreviewMessage>) {
+      if (event.source !== iframeRef.current?.contentWindow) return;
+      const data = event.data;
+      if (!data || data.source !== "dyna-preview") return;
+
+      if (data.kind === "error") {
+        setHealth({ kind: "error", message: data.message || "未知错误" });
+      } else if (data.kind === "empty") {
+        // An error already reported is the more useful message; keep it.
+        setHealth((current) =>
+          current.kind === "error" ? current : { kind: "empty" },
+        );
+      } else if (data.kind === "ok") {
+        setHealth((current) =>
+          current.kind === "error" ? current : { kind: "ok" },
+        );
+      }
+    }
+
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, []);
 
   function reload() {
+    setHealth({ kind: "pending" });
     setRevision((value) => value + 1);
   }
 
   function fullscreen() {
     void iframeRef.current?.requestFullscreen();
   }
+
+  const broken = health.kind === "error" || health.kind === "empty";
 
   return (
     <section className="flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -46,6 +93,38 @@ export function GamePreview({
           </Button>
         </div>
       </div>
+
+      {broken && (
+        <div className="shrink-0 border-b border-accent/25 bg-accent-soft px-3 py-2.5">
+          <p className="text-sm leading-6 text-accent-hover">
+            {health.kind === "error"
+              ? "游戏跑起来出错了，画面可能是空的。"
+              : "画面是空的——代码跑通了，但什么都没画出来。"}
+          </p>
+          {health.kind === "error" && (
+            <pre className="scrollbar-thin mt-1.5 max-h-20 overflow-auto font-mono text-[11px] leading-5 text-accent-hover/80">
+              <code>{health.message}</code>
+            </pre>
+          )}
+          {onRetry && (
+            <Button
+              size="sm"
+              variant="secondary"
+              className="mt-2"
+              onClick={() =>
+                onRetry(
+                  health.kind === "error"
+                    ? `画面没出来，控制台报错：${health.message}。请修好它。`
+                    : "画面是空的，什么都没渲染出来。请检查并修好。",
+                )
+              }
+            >
+              让它修一下
+            </Button>
+          )}
+        </div>
+      )}
+
       {/* No min-height: the canvas takes whatever the pane gives it. A floor
           here would make the iframe push the grid row taller instead. */}
       <iframe

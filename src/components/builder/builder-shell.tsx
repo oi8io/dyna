@@ -314,7 +314,11 @@ export function BuilderShell({
               value={prompt}
               onChange={(event) => setPrompt(event.target.value)}
               disabled={busy}
-              placeholder="例如：球速逐渐加快，增加暂停键…"
+              placeholder={
+                hasVersion
+                  ? "接着说，比如：球速再快一点，加个暂停键…"
+                  : "描述你想要的玩法…"
+              }
               className="min-h-24 resize-none"
             />
             <Button
@@ -323,7 +327,7 @@ export function BuilderShell({
               disabled={busy || !prompt.trim()}
             >
               <Send className="size-4" />
-              生成新版本
+              发送
             </Button>
           </form>
         </aside>
@@ -365,7 +369,11 @@ export function BuilderShell({
 
           {workspaceTab === "preview" &&
             (artifactHtml ? (
-              <GamePreview artifactHtml={artifactHtml} title={project.title} />
+              <GamePreview
+                artifactHtml={artifactHtml}
+                title={project.title}
+                onRetry={busy ? undefined : submitTurn}
+              />
             ) : (
               <div className="scrollbar-thin min-h-0 flex-1 overflow-auto p-6">
                 <h2 className="font-serif text-lg text-ink">
