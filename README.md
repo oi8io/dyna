@@ -2,7 +2,7 @@
 
 Dyna Studio 是一个 Web 作品生成器：用户登录后，用一句话生成真实的 React/TypeScript 工程，立即试玩、继续对话修改，并发布公开链接。首个品类是网页小游戏，后续会扩展到海报、动画、短剧和网页。
 
-默认使用零成本 `fake` 模式。它仍会创建项目、保存多文件源码、生成版本、运行安全校验、展示可玩产物并发布快照。切换到 `live` 后，同一链路会调用 DeepSeek，并在 Vercel Sandbox 中构建源码。
+默认使用零成本 `fake` 模式。它仍会创建项目、保存多文件源码、生成版本、运行安全校验、展示可玩产物并发布快照。切换到 `live` 后，同一链路会调用 DeepSeek 并真实构建源码。
 
 ## 已实现
 
@@ -15,7 +15,7 @@ Dyna Studio 是一个 Web 作品生成器：用户登录后，用一句话生成
 - 编辑只重写改动的文件，构建失败自动带着编译错误重试一次
 - React/TypeScript 多文件模板与只读源码浏览
 - Fake/DeepSeek Provider Adapter
-- Vercel Sandbox 临时 microVM 构建器
+- 进程内 esbuild 构建器（Vercel 上可选 Sandbox microVM）
 - 文件白名单、路径穿越防护、体积和远程资源限制
 - 原子额度预占、幂等、全局预算、并发和速率限制
 - `iframe sandbox="allow-scripts"` 隔离预览
@@ -27,7 +27,7 @@ Dyna Studio 是一个 Web 作品生成器：用户登录后，用一句话生成
 
 ## 技术栈
 
-Next.js 16、React 19、TypeScript、Tailwind CSS 4、shadcn 风格组件、shiki、Supabase、DeepSeek、Vercel Sandbox、Vitest 和 esbuild。
+Next.js 16、React 19、TypeScript、Tailwind CSS 4、shadcn 风格组件、shiki、Supabase、DeepSeek、Vitest 和 esbuild，部署在 Railway 的常驻 Node 进程上。
 
 生成过程通过 SSE 实时推送：模型每写出一段代码，Builder 的只读编辑器就同步显示，并自动切到正在写的文件。
 
@@ -41,7 +41,7 @@ cp .env.example .env.local
 pnpm dev
 ```
 
-打开 `http://localhost:3000`。所有变量记录在 `.env.example`；真实密钥只放 `.env.local` 或 Vercel 服务端环境变量。
+打开 `http://localhost:3000`。所有变量记录在 `.env.example`；真实密钥只放 `.env.local` 或部署平台的服务端环境变量。
 
 ## Supabase 初始化
 
@@ -81,10 +81,9 @@ Live 模式只有同时满足以下条件才会启用：
 - `AI_PROVIDER_MODE=live` 与 `APP_GENERATION_ENABLED=true`
 - 三个预算／额度环境变量均为正数
 - DeepSeek Key 已配置
-- 本地存在 `VERCEL_OIDC_TOKEN`，或应用运行在已启用 OIDC 的 Vercel 项目中
 - 数据库 `app_budget.generation_enabled=true`
 
-本地通过 `vercel link` 和 `vercel env pull` 获取短期 OIDC；生产环境由 Vercel 提供。
+构建器由 `BUILD_EXECUTOR` 指定：`local` 用进程内 esbuild（任何主机可用），`sandbox` 用 Vercel microVM（仅 Vercel）。
 
 ## 安全模型
 
@@ -123,8 +122,7 @@ docs/                    PRD、实施计划、任务板与演示脚本
 - 应用数据库迁移
 - 配置 Google OAuth 与 Redirect URL
 - 确认公共预算和新用户额度
-- Link Vercel 并获取 OIDC
-- 配置 Vercel 环境变量
+- 在 Railway 配置环境变量并绑定域名
 - 创建 GitHub 远端、推送并部署
 
 这些步骤涉及真实外部项目，仓库不会擅自使用默认额度或自动部署。

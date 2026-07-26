@@ -92,9 +92,9 @@ export async function buildGeneratedWorkspace(
     return validateInVercelSandbox(workspace);
   }
 
-  if (process.env.NODE_ENV !== "production") {
-    return buildWorkspaceLocally(workspace);
-  }
-
-  throw new Error("实时生成需要 Vercel OIDC 才能安全构建");
+  // esbuild parses and bundles; it does not run the generated code, install
+  // anything or execute a build script. The boundaries that matter — the file
+  // whitelist, the artifact CSP check and the sandboxed iframe at runtime —
+  // are unchanged either way.
+  return buildWorkspaceLocally(workspace);
 }

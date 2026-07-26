@@ -72,6 +72,32 @@ const serverEnvSchema = z.object({
   APP_NEW_USER_CREATE_LIMIT: optionalPositiveInteger,
   APP_NEW_USER_EDIT_LIMIT: optionalPositiveInteger,
   VERCEL_OIDC_TOKEN: z.string().optional(),
+  /**
+   * Which builder turns generated source into a playable artifact.
+   *
+   * `sandbox` runs a real install-and-build in a Vercel microVM and only works
+   * on Vercel. `local` bundles in-process with esbuild: it never runs the
+   * generated code, never installs anything and never executes a build script,
+   * so it is the right choice anywhere the microVM is unavailable.
+   *
+   * Made explicit because it used to be inferred from the presence of a Vercel
+   * OIDC token, which silently downgraded the whole app to demo mode the moment
+   * it ran anywhere else.
+   */
+  BUILD_EXECUTOR: z.enum(["sandbox", "local"]).default("local"),
+  /**
+   * Ceiling for one generation request, in milliseconds.
+   *
+   * On a serverless host this had to stay under the platform's own limit,
+   * because being killed skipped the cleanup that releases the reserved budget.
+   * A long-lived process has no such limit, so this is now only a guard against
+   * a run that never converges.
+   */
+  GENERATION_DEADLINE_MS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(600_000),
   SANDBOX_RUNTIME: z.enum(["node22", "node24"]).default("node22"),
   SANDBOX_VCPUS: z.coerce.number().int().min(1).max(4).default(1),
   SANDBOX_TIMEOUT_MS: z.coerce.number().int().positive().default(45_000),
@@ -86,20 +112,26 @@ export function getServerEnv() {
 
 export function canUseVercelSandbox() {
   const env = getServerEnv();
+  if (env.BUILD_EXECUTOR !== "sandbox") return false;
   // Local development receives a short-lived token from `vercel env pull`.
   // On Vercel, the Sandbox SDK obtains the deployment OIDC token from the
   // active request context even though it is not exposed as a runtime env var.
   return Boolean(env.VERCEL_OIDC_TOKEN) || process.env.VERCEL === "1";
 }
 
+/**
+ * True when a request should really call the model.
+ *
+ * Deliberately does not ask where it is running. Tying this to a Vercel OIDC
+ * token meant that on any other host it quietly returned false and every
+ * generation produced the demo fixture instead — no error, no log, just the
+ * same breakout game every time.
+ */
 export function isLiveGenerationReady() {
   const env = getServerEnv();
-  const hasSafeBuildExecutor =
-    canUseVercelSandbox() || process.env.NODE_ENV !== "production";
   return (
     env.APP_GENERATION_ENABLED &&
     env.AI_PROVIDER_MODE === "live" &&
-    hasSafeBuildExecutor &&
     env.APP_PUBLIC_BUDGET_USD !== undefined &&
     env.APP_NEW_USER_CREATE_LIMIT !== undefined &&
     env.APP_NEW_USER_EDIT_LIMIT !== undefined

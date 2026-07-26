@@ -33,20 +33,18 @@ import {
 
 // The response is a long-lived stream; it must never be cached or prerendered.
 export const dynamic = "force-dynamic";
-export const maxDuration = 300;
 
 /**
- * A generation runs as several short requests rather than one long one.
+ * A generation runs as several requests rather than one.
  *
- * Doing it in a single invocation put the whole run under the platform's
- * per-request wall clock, and made the model emit an entire game in one answer
- * — which is both the slowest and the lowest-quality way to ask for it. Each
- * phase below is its own request with the full budget available to it.
+ * That started as a way to stay under a serverless wall clock, but the reason
+ * it stayed is quality: asking for a whole game in one answer makes the model
+ * hold the loop, the components and the styling in a single context and emit
+ * them all at once, and the tail of that output is where it falls apart.
  */
 const HISTORY_TURNS = 12;
-const DEADLINE_MS = (maxDuration - 20) * 1000;
 const PLAN_MAX_MS = 60_000;
-/** Left for persisting and, in the finish phase, for the sandbox build. */
+/** Left for persisting and, in the finish phase, for the build. */
 const TAIL_RESERVE_MS = 100_000;
 const REPAIR_MIN_MS = 70_000;
 
@@ -139,10 +137,11 @@ export async function POST(
         if (closed) return;
         controller.enqueue(encoder.encode(encodeSseFrame(event)));
       };
-      const startedAt = Date.now();
-      const remainingMs = () => DEADLINE_MS - (Date.now() - startedAt);
-
       const env = getServerEnv();
+      const startedAt = Date.now();
+      const remainingMs = () =>
+        env.GENERATION_DEADLINE_MS - (Date.now() - startedAt);
+
       let jobId: string | undefined;
       let settled = false;
       const settle = async (
