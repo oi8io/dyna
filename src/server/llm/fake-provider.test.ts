@@ -45,12 +45,10 @@ describe("FakeGameProvider", () => {
     ).not.toThrow();
   });
 
-  it("returns only the file it was asked for", async () => {
-    const { file } = await new FakeGameProvider().writeFile(
-      writeInputFixture({ path: "src/game/engine.ts", intent: "玩法循环" }),
-    );
-    expect(file.path).toBe("src/game/engine.ts");
-    expect(file.content).toContain("BreakoutEngine");
+  it("writes the engine the App imports, in the same pass", async () => {
+    const { files } = await new FakeGameProvider().write(writeInputFixture());
+    const engine = files.find((file) => file.path === "src/game/engine.ts");
+    expect(engine?.content).toContain("BreakoutEngine");
   });
 
   it("plans files in dependency order so later ones can rely on earlier", async () => {

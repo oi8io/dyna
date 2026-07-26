@@ -35,23 +35,19 @@ export interface PlanInput {
   timeoutMs?: number;
 }
 
-export interface WriteFileInput extends PlanInput {
+export interface WriteInput extends PlanInput {
   plan: GenerationPlan;
-  /** The one file this call is responsible for. */
-  path: string;
-  intent: string;
-  /** Files already written in this run, path to content. */
-  drafts: Record<string, string>;
   onProgress?: (delta: StreamDelta) => void;
-  /** Present on a second pass after the build rejected this file. */
+  /** Present on a second pass after the build rejected the first attempt. */
   repair?: {
-    attempted: string;
+    attempted: AgentFile[];
     error: string;
   };
 }
 
-export interface WriteFileResult {
-  file: AgentFile;
+export interface WriteResult {
+  /** Every file the plan called for, decided in one pass. */
+  files: AgentFile[];
   provider: "fake" | "deepseek";
   model: string;
   usage: GenerationUsage;
@@ -73,8 +69,14 @@ export interface PlanResult {
 export interface GameGenerationProvider {
   /** Stage one: decide what to do, or ask. Writes no code. */
   plan(input: PlanInput): Promise<PlanResult>;
-  /** Stage two, once per planned file. */
-  writeFile(input: WriteFileInput): Promise<WriteFileResult>;
+  /**
+   * Stage two: write every planned file in one pass.
+   *
+   * One call rather than one per file, because imports, export names and prop
+   * shapes have to agree across files, and the cheapest way to make them agree
+   * is to decide them in a single context.
+   */
+  write(input: WriteInput): Promise<WriteResult>;
   /**
    * A ready-made artifact, when the provider has one and no build is needed.
    * Only demo mode does; live generation always goes through a real build.

@@ -1,8 +1,7 @@
 import { FakeGameProvider } from "@/server/llm/fake-provider";
 import type { GenerationPlan } from "@/server/llm/plan";
-import type { PlanInput, WriteFileInput } from "@/server/llm/types";
+import type { PlanInput, WriteInput } from "@/server/llm/types";
 import { createGameWorkspace } from "@/server/template/game-template";
-import type { AgentFile } from "@/server/workspace/schema";
 
 /** A confident plan, i.e. one that asks nothing and therefore proceeds to build. */
 export function planFixture(overrides: Partial<GenerationPlan> = {}) {
@@ -40,14 +39,11 @@ export function planInputFixture(
 }
 
 export function writeInputFixture(
-  overrides: Partial<WriteFileInput> = {},
-): WriteFileInput {
+  overrides: Partial<WriteInput> = {},
+): WriteInput {
   return {
     ...planInputFixture(),
     plan: planFixture(),
-    path: "src/App.tsx",
-    intent: "渲染游戏外壳",
-    drafts: {},
     ...overrides,
   };
 }
@@ -60,20 +56,7 @@ export async function fakeWorkspaceFixture(prompt = "做一个霓虹风格打砖
   const provider = new FakeGameProvider();
   const input = planInputFixture({ prompt, originalPrompt: prompt });
   const { plan } = await provider.plan(input);
-  const drafts: Record<string, string> = {};
-  const files: AgentFile[] = [];
-
-  for (const change of plan.changes) {
-    const { file } = await provider.writeFile({
-      ...input,
-      plan,
-      path: change.path,
-      intent: change.intent,
-      drafts,
-    });
-    drafts[file.path] = file.content;
-    files.push(file);
-  }
+  const { files } = await provider.write({ ...input, plan });
 
   return {
     plan,

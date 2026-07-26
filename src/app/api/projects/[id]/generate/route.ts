@@ -25,7 +25,6 @@ import { createGameWorkspace } from "@/server/template/game-template";
 import type { AgentFile, GeneratedWorkspace } from "@/server/workspace/schema";
 import {
   extractAgentFiles,
-  isEditableAgentPath,
   mergeAgentFiles,
   redactBuildLog,
   validateWorkspace,
@@ -35,16 +34,18 @@ import {
 export const dynamic = "force-dynamic";
 
 /**
- * A generation runs as several requests rather than one.
+ * A generation is two requests: `plan`, then `write`.
  *
- * That started as a way to stay under a serverless wall clock, but the reason
- * it stayed is quality: asking for a whole game in one answer makes the model
- * hold the loop, the components and the styling in a single context and emit
- * them all at once, and the tail of that output is where it falls apart.
+ * They are separate because the first can end the run by asking a question,
+ * and everything after it assumes the plan was agreed. The files themselves are
+ * written in a single model call — they have to agree with each other, and the
+ * cheapest way to make an import match an export is to decide both in one
+ * context. Writing a file per request was a way to stay under a serverless wall
+ * clock; on a long-lived process that cost buys nothing.
  */
 const HISTORY_TURNS = 12;
 const PLAN_MAX_MS = 60_000;
-/** Left for persisting and, in the finish phase, for the build. */
+/** Left for the build and for persisting, after the last model call. */
 const TAIL_RESERVE_MS = 100_000;
 const REPAIR_MIN_MS = 70_000;
 
@@ -56,12 +57,7 @@ const bodySchema = z.discriminatedUnion("phase", [
     kind: z.enum(["create", "edit"]).default("edit"),
     idempotencyKey: z.string().min(8).max(120),
   }),
-  z.object({
-    phase: z.literal("file"),
-    jobId: z.uuid(),
-    path: z.string().min(1).max(240),
-  }),
-  z.object({ phase: z.literal("finish"), jobId: z.uuid() }),
+  z.object({ phase: z.literal("write"), jobId: z.uuid() }),
 ]);
 
 function readableGenerationError(error: unknown) {
@@ -303,8 +299,8 @@ export async function POST(
             changes: plan.changes,
             assumptions: plan.assumptions,
           });
-          // Demo mode has no job row, so the client gets a synthetic id and the
-          // subsequent phases fall back to re-planning from the same prompt.
+          // Demo mode has no job row; the client still needs a handle to
+          // continue with.
           send({
             type: "job",
             jobId: jobId ?? "demo",
@@ -316,7 +312,7 @@ export async function POST(
         // ---- Later phases: reload the agreed plan --------------------------
         const { data: jobRow } = await supabase
           .from("generation_jobs")
-          .select("id, kind, plan, draft_files, status")
+          .select("id, kind, plan, status")
           .eq("id", phase.jobId)
           .maybeSingle();
         if (!jobRow || jobRow.status !== "running") {
@@ -329,63 +325,24 @@ export async function POST(
         const storedPrompt =
           typeof stored.prompt === "string" ? stored.prompt : plan.understanding;
         const kind = (jobRow.kind as "create" | "edit") ?? "edit";
-        const drafts = (jobRow.draft_files ?? {}) as Record<string, string>;
         const { input, versionNumber, previousWorkspace } = await loadContext(
           kind,
           storedPrompt,
         );
 
-        // ---- Phase two: write exactly one file -----------------------------
-        if (phase.phase === "file") {
-          const change = plan.changes.find(
-            (entry) => entry.path === phase.path,
-          );
-          if (!change || !isEditableAgentPath(change.path)) {
-            throw new Error(`计划里没有这个文件：${phase.path}`);
-          }
-
-          send({
-            type: "phase",
-            phase: "writing",
-            message: `正在写 ${change.path}`,
+        // ---- Phase two: write every planned file in one pass ---------------
+        send({ type: "phase", phase: "writing", message: "正在写代码" });
+        const written = await provider
+          .write({
+            ...input,
+            plan,
+            onProgress: send,
+            timeoutMs: remainingMs() - TAIL_RESERVE_MS,
+          })
+          .catch((error: unknown) => {
+            throw labelStage(error, "write");
           });
-          const written = await provider
-            .writeFile({
-              ...input,
-              plan,
-              path: change.path,
-              intent: change.intent,
-              drafts,
-              onProgress: send,
-              timeoutMs: remainingMs() - TAIL_RESERVE_MS,
-            })
-            .catch((error: unknown) => {
-              throw labelStage(error, "write");
-            });
-
-          await supabase.rpc("save_generation_draft", {
-            p_job_id: jobId,
-            p_path: written.file.path,
-            p_content: written.file.content,
-          });
-
-          const done = new Set([...Object.keys(drafts), written.file.path]);
-          const next = plan.changes.find((entry) => !done.has(entry.path));
-          send({
-            type: "step-done",
-            path: written.file.path,
-            nextPath: next?.path,
-          });
-          return;
-        }
-
-        // ---- Phase three: assemble, build, persist -------------------------
-        const changed = plan.changes
-          .filter((entry) => typeof drafts[entry.path] === "string")
-          .map((entry) => ({ path: entry.path, content: drafts[entry.path] }));
-        if (!changed.length) {
-          throw new Error("没有任何已写好的文件可以构建。");
-        }
+        const changed = written.files;
 
         const previousAgentFiles = previousWorkspace
           ? extractAgentFiles(previousWorkspace)
@@ -455,41 +412,26 @@ export async function POST(
             throw buildError;
           }
 
-          // Repair the single most likely culprit rather than everything: the
-          // last file written is where a compile error almost always lives.
-          const target = changed.at(-1);
-          if (!target) throw buildError;
           send({
             type: "phase",
             phase: "repairing",
-            message: `出了点问题，正在修 ${target.path}`,
+            message: "出了点问题，正在修",
           });
+          // Rewrites the whole set, not just the file the error names. A
+          // mismatched import is a disagreement between two files, and fixing
+          // only one end of it is how a repair introduces the next failure.
           const fixed = await provider
-            .writeFile({
+            .write({
               ...input,
               plan,
-              path: target.path,
-              intent:
-                plan.changes.find((entry) => entry.path === target.path)
-                  ?.intent ?? "",
-              drafts,
               onProgress: send,
               timeoutMs: remainingMs() - TAIL_RESERVE_MS,
-              repair: { attempted: target.content, error: detail },
+              repair: { attempted: changed, error: detail },
             })
             .catch((error: unknown) => {
               throw labelStage(error, "repair");
             });
-          await supabase.rpc("save_generation_draft", {
-            p_job_id: jobId,
-            p_path: fixed.file.path,
-            p_content: fixed.file.content,
-          });
-          workspace = assemble(
-            changed.map((file) =>
-              file.path === fixed.file.path ? fixed.file : file,
-            ) as AgentFile[],
-          );
+          workspace = assemble(fixed.files);
           build = await buildGeneratedWorkspace(workspace, prebuilt);
         }
 
@@ -567,7 +509,7 @@ export async function POST(
         });
         // A failed step keeps the job alive so the finished files survive and
         // the user can retry just that step. Only a terminal phase settles.
-        if (phase.phase !== "file") {
+        {
           await Promise.all([
             supabase
               .from("projects")

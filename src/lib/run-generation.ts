@@ -11,8 +11,7 @@ interface RunGenerationOptions {
 
 type Phase =
   | { phase: "plan"; prompt: string; kind: string; idempotencyKey: string }
-  | { phase: "file"; jobId: string; path: string }
-  | { phase: "finish"; jobId: string };
+  | { phase: "write"; jobId: string };
 
 interface PhaseOutcome {
   ok: boolean;
@@ -79,12 +78,12 @@ async function runPhase(
 }
 
 /**
- * Drives a generation to completion across several short requests.
+ * Drives a generation to completion.
  *
- * Plan, then one request per planned file, then a final assemble-and-build.
- * Splitting it this way keeps every request comfortably inside the platform's
- * per-invocation limit, and lets the model spend its whole reasoning budget on
- * one file at a time instead of emitting a complete game in a single answer.
+ * Two requests: understand the request, then write and build. The first can end
+ * the run by asking a question, which is why it is separate — everything after
+ * it assumes the plan was agreed. The files themselves are written together, in
+ * one model call, because they have to agree with each other.
  */
 export async function runGeneration({
   projectId,
@@ -111,23 +110,11 @@ export async function runGeneration({
     return { ok: false, error: "计划没有指出要写哪些文件。" };
   }
 
-  for (const path of planned.files) {
-    const step = await runPhase(
-      projectId,
-      { phase: "file", jobId: planned.jobId, path },
-      onEvent,
-      signal,
-    );
-    // Files already written stay on the job, so a retry resumes rather than
-    // starting over.
-    if (!step.ok) return { ok: false, error: step.error };
-  }
-
-  const finished = await runPhase(
+  const written = await runPhase(
     projectId,
-    { phase: "finish", jobId: planned.jobId },
+    { phase: "write", jobId: planned.jobId },
     onEvent,
     signal,
   );
-  return { ok: finished.ok, error: finished.error };
+  return { ok: written.ok, error: written.error };
 }

@@ -9,17 +9,17 @@ const BOUNDARIES = `Platform boundaries (both stages):
 - No remote assets, no network, no storage, no cookies, no top navigation, no shell.
 - The runtime is React 19 + TypeScript, bundled by esbuild, rendered inside a sandboxed iframe.`;
 
-export const WRITE_FILE_PROMPT = `You are Dyna's web-game engineer. A plan has already been agreed. Write exactly ONE file from it.
+export const WRITE_PROMPT = `You are Dyna's web-game engineer. A plan has already been agreed. Write every file in it, in one response.
 
 Return ONLY valid JSON:
-{"files":[{"path":"<the requested path>","content":"string"}]}
+{"files":[{"path":"src/game/engine.ts","content":"string"},{"path":"src/App.tsx","content":"string"}]}
 
 Rules:
-- Write the single file you were asked for, and only that one. Every other file in your response is discarded unread, so including them wastes your output budget and buys nothing.
-- The remaining files each get their own turn. You are not being asked to finish the project here.
-- Return its COMPLETE contents. Never a patch, never an ellipsis, never "unchanged" placeholders.
-- Files already written in this run are shown to you. Match their exports, imports, prop shapes, CSS class names and behaviour exactly — they are already committed and will not be revisited.
-- Files not yet written are listed with their intent. Write against that intent so the pieces fit.
+- Write every path listed in the plan's "changes", and nothing outside that list.
+- Return each file's COMPLETE contents. Never a patch, never an ellipsis, never "unchanged" placeholders.
+- These files have to fit together: an import in one must match an export in another, a CSS class used in a component must exist in the stylesheet, a prop passed must be a prop declared. You are writing them together precisely so they agree.
+- Relative import paths are counted from the importing file's own directory. \`src/components/game/Board.tsx\` reaches \`src/game/engine.ts\` as \`../../game/engine\`, not \`../game/engine\`.
+- The entry point renders \`src/App.tsx\` and loads \`src/styles.css\`. Both must exist for anything to appear.
 - Implement the plan and nothing else. Do not redesign.
 - Do not wrap JSON in markdown fences.
 

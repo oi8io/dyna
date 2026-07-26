@@ -3,14 +3,14 @@ import type {
   GameGenerationProvider,
   PlanInput,
   PlanResult,
-  WriteFileInput,
-  WriteFileResult,
+  WriteInput,
+  WriteResult,
 } from "@/server/llm/types";
 import { generationPlanSchema } from "@/server/llm/plan";
 import {
   PLAN_PROMPT,
   REPAIR_PROMPT,
-  WRITE_FILE_PROMPT,
+  WRITE_PROMPT,
   describeManifest,
 } from "@/server/llm/prompts";
 import { AgentStreamParser } from "@/server/llm/stream-parser";
@@ -20,6 +20,7 @@ import type { AgentFile } from "@/server/workspace/schema";
 import {
   extractAgentFiles,
   generatedFileSchema,
+  isEditableAgentPath,
   validateAgentFiles,
 } from "@/server/workspace/schema";
 import { z } from "zod";
@@ -258,29 +259,6 @@ function contextBlock(input: PlanInput, includeSource: boolean) {
   return parts.join("\n\n");
 }
 
-/**
- * The exact specifier one workspace file should use to import another.
- *
- * Counting `../` levels across directories is arithmetic the model gets wrong
- * often enough to be the leading cause of failed builds, and it is arithmetic
- * we can simply do for it.
- */
-function relativeSpecifier(fromPath: string, toPath: string) {
-  const from = fromPath.split("/").slice(0, -1);
-  const to = toPath.split("/");
-  const file = to.pop() ?? "";
-  let shared = 0;
-  while (shared < from.length && shared < to.length && from[shared] === to[shared]) {
-    shared += 1;
-  }
-  const up = Array.from({ length: from.length - shared }, () => "..");
-  const down = to.slice(shared);
-  const stem = file.replace(/\.(ts|tsx|js|jsx)$/, "");
-  const segments = [...up, ...down, stem];
-  const joined = segments.join("/");
-  return joined.startsWith(".") ? joined : `./${joined}`;
-}
-
 export class DeepSeekGameProvider implements GameGenerationProvider {
   async plan(input: PlanInput): Promise<PlanResult> {
     const env = getServerEnv();
@@ -319,37 +297,23 @@ export class DeepSeekGameProvider implements GameGenerationProvider {
     };
   }
 
-  async writeFile(input: WriteFileInput): Promise<WriteFileResult> {
+  async write(input: WriteInput): Promise<WriteResult> {
     const env = getServerEnv();
 
-    const written = Object.entries(input.drafts)
-      .map(
-        ([path, content]) =>
-          `--- ${path} (already written; import it as "${relativeSpecifier(input.path, path)}") ---\n${content}`,
-      )
-      .join("\n\n");
-    const pending = input.plan.changes
-      .filter(
-        (change) =>
-          change.path !== input.path && !(change.path in input.drafts),
-      )
+    const wanted = input.plan.changes
       .map((change) => `${change.path} — ${change.intent}`)
       .join("\n");
 
     const messages: ChatMessage[] = [
-      { role: "system", content: WRITE_FILE_PROMPT },
+      { role: "system", content: WRITE_PROMPT },
       {
         role: "user",
         content: [
           contextBlock(input, true),
           `Agreed plan:\n${JSON.stringify(input.plan, null, 2)}`,
-          written && `Files written so far in this run:\n${written}`,
-          pending && `Still to be written after this one:\n${pending}`,
+          `Write exactly these files:\n${wanted}`,
           `User request (${input.kind}):\n${input.prompt}`,
-          `Write this file now: ${input.path}\nIts role: ${input.intent}`,
-        ]
-          .filter(Boolean)
-          .join("\n\n"),
+        ].join("\n\n"),
       },
     ];
 
@@ -357,9 +321,7 @@ export class DeepSeekGameProvider implements GameGenerationProvider {
       messages.push(
         {
           role: "assistant",
-          content: JSON.stringify({
-            files: [{ path: input.path, content: input.repair.attempted }],
-          }),
+          content: JSON.stringify({ files: input.repair.attempted }),
         },
         {
           role: "user",
@@ -368,8 +330,10 @@ export class DeepSeekGameProvider implements GameGenerationProvider {
       );
     }
 
-    // One file per call, so the reasoning budget is spent on a focused task
-    // rather than on holding an entire game in mind at once.
+    // One call for the whole set. Imports, export names and prop shapes have to
+    // agree across these files, and deciding them in one context is what makes
+    // them agree — writing a file at a time left each one guessing about the
+    // others and produced import paths that pointed at nothing.
     const { content, usage } = await callDeepSeek(messages, {
       temperature: input.kind === "edit" ? 0.2 : 0.6,
       model: env.DEEPSEEK_MODEL,
@@ -383,29 +347,32 @@ export class DeepSeekGameProvider implements GameGenerationProvider {
     );
     if (!parsed.success) {
       throw new Error(
-        `模型返回的结构无法解析（${input.path}）：${parsed.error.issues[0]?.message ?? "unknown"}`,
+        `模型返回的结构无法解析：${parsed.error.issues[0]?.message ?? "unknown"}`,
       );
     }
-    const generated = parsed.data;
 
-    // The model was asked for one specific path. Take that one if present and
-    // ignore anything else it decided to include.
-    const candidates = generated.files
-      .map((file) => generatedFileSchema.safeParse(file))
-      .flatMap((parsed) => (parsed.success ? [parsed.data] : []));
-    const chosen =
-      candidates.find((file) => file.path === input.path) ?? candidates[0];
-    if (!chosen) {
-      throw new Error(`模型没有返回 ${input.path} 的内容`);
+    // Keep what the plan asked for and drop the rest. The model occasionally
+    // echoes platform-owned files back unchanged; validateAgentFiles is the
+    // hard backstop either way.
+    const planned = new Set(input.plan.changes.map((change) => change.path));
+    const files = validateAgentFiles(
+      parsed.data.files
+        .map((file) => generatedFileSchema.safeParse(file))
+        .flatMap((result) => (result.success ? [result.data] : []))
+        .filter(
+          (file) =>
+            planned.has(file.path) &&
+            isEditableAgentPath(file.path) &&
+            file.path !== SPEC_PATH,
+        ),
+    ) as AgentFile[];
+
+    if (!files.length) {
+      throw new Error("模型没有返回计划里的任何文件");
     }
 
-    // The requested path is authoritative: the plan decided it, not the model.
-    const [file] = validateAgentFiles([
-      { path: input.path, content: chosen.content },
-    ]) as AgentFile[];
-
     return {
-      file,
+      files,
       provider: "deepseek" as const,
       model: env.DEEPSEEK_MODEL,
       usage: {
@@ -413,7 +380,7 @@ export class DeepSeekGameProvider implements GameGenerationProvider {
         outputTokens: usage.completion_tokens,
         // Conservative flat reservation until provider billing metadata is
         // available. This keeps the public budget from under-counting.
-        estimatedCostUsd: 0.02,
+        estimatedCostUsd: 0.05,
       },
     };
   }

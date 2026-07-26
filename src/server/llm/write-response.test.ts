@@ -1,38 +1,56 @@
 import { describe, expect, it } from "vitest";
 
+import { findUnresolvedImports } from "@/server/build/imports";
 import { FakeGameProvider } from "@/server/llm/fake-provider";
-import { writeInputFixture } from "@/server/llm/test-fixtures";
+import {
+  fakeWorkspaceFixture,
+  planFixture,
+  writeInputFixture,
+} from "@/server/llm/test-fixtures";
 
 /**
- * The write step asks for one file and picks the requested path out of whatever
- * comes back. A model that returns the whole project is verbose, not wrong —
- * rejecting that response threw away one that contained exactly what was asked
- * for.
+ * Files are written together, in one call, because they have to agree with each
+ * other. Writing them one at a time left each one guessing about the others and
+ * produced import paths that pointed at nothing.
  */
-describe("single-file write step", () => {
-  it("returns the requested path even when the plan lists many files", async () => {
-    const { file } = await new FakeGameProvider().writeFile(
-      writeInputFixture({ path: "src/styles.css", intent: "样式" }),
-    );
-    expect(file.path).toBe("src/styles.css");
+describe("write step", () => {
+  it("returns every file the plan asked for", async () => {
+    const { files } = await new FakeGameProvider().write(writeInputFixture());
+    expect(files.map((file) => file.path)).toEqual([
+      "src/game/engine.ts",
+      "src/App.tsx",
+    ]);
   });
 
-  it("writes a path the fixture has no content for rather than failing", async () => {
-    const { file } = await new FakeGameProvider().writeFile(
+  it("covers a plan with more files than the fixture knows", async () => {
+    const { files } = await new FakeGameProvider().write(
       writeInputFixture({
-        path: "src/components/game/Hud.tsx",
-        intent: "分数显示",
+        plan: planFixture({
+          changes: [
+            { path: "src/App.tsx", intent: "外壳" },
+            { path: "src/components/game/Hud.tsx", intent: "分数显示" },
+          ],
+        }),
       }),
     );
-    expect(file.path).toBe("src/components/game/Hud.tsx");
-    expect(file.content).toContain("分数显示");
+    expect(files).toHaveLength(2);
+    expect(files[1].content).toContain("分数显示");
   });
 
-  it("refuses a path outside the agent's writable area", async () => {
+  it("refuses a plan naming a path outside the writable area", async () => {
     await expect(
-      new FakeGameProvider().writeFile(
-        writeInputFixture({ path: "package.json", intent: "改依赖" }),
+      new FakeGameProvider().write(
+        writeInputFixture({
+          plan: planFixture({
+            changes: [{ path: "package.json", intent: "改依赖" }],
+          }),
+        }),
       ),
     ).rejects.toThrow();
+  });
+
+  it("produces a workspace whose imports all resolve", async () => {
+    const { workspace } = await fakeWorkspaceFixture();
+    expect(findUnresolvedImports(workspace)).toEqual([]);
   });
 });

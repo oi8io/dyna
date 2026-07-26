@@ -3,8 +3,8 @@ import type {
   GameGenerationProvider,
   PlanInput,
   PlanResult,
-  WriteFileInput,
-  WriteFileResult,
+  WriteInput,
+  WriteResult,
 } from "@/server/llm/types";
 import type { AgentFile } from "@/server/workspace/schema";
 import { validateAgentFiles } from "@/server/workspace/schema";
@@ -139,22 +139,28 @@ export class FakeGameProvider implements GameGenerationProvider {
     return createArtifact(input);
   }
 
-  async writeFile(input: WriteFileInput): Promise<WriteFileResult> {
+  async write(input: WriteInput): Promise<WriteResult> {
     const title = titleFromPrompt(input.prompt);
     const fixture = fakeAgentFiles(title, input.prompt);
-    const candidate = fixture.find((entry) => entry.path === input.path) ?? {
-      path: input.path,
-      content: `// ${input.path}\n// ${input.intent}\n`,
-    };
+
+    const candidates = input.plan.changes.map(
+      (change) =>
+        fixture.find((entry) => entry.path === change.path) ?? {
+          path: change.path,
+          content: `// ${change.path}\n// ${change.intent}\n`,
+        },
+    );
 
     // The same boundary the live provider enforces. Demo mode must not be able
     // to produce a workspace that live mode would reject.
-    const [file] = validateAgentFiles([candidate]) as AgentFile[];
+    const files = validateAgentFiles(candidates) as AgentFile[];
 
-    if (input.onProgress) await replayFile(file, input.onProgress);
+    if (input.onProgress) {
+      for (const file of files) await replayFile(file, input.onProgress);
+    }
 
     return {
-      file,
+      files,
       provider: "fake" as const,
       model: "deterministic-game-fixture-v1",
       usage: { inputTokens: 0, outputTokens: 0, estimatedCostUsd: 0 },
