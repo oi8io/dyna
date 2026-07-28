@@ -185,3 +185,13 @@ The code runs out of the box — `fake` mode needs no keys at all. Running `live
 - Configure environment variables and bind a domain on your host
 
 The repository will not assume default limits or deploy anything on your behalf — budgets and keys belong to real external projects, and the person deploying has to confirm them explicitly.
+
+## License
+
+Dyna Studio is licensed under the **GNU Affero General Public License v3.0** — see [`LICENSE`](LICENSE).
+
+In short: use it, fork it, run it, sell services on top of it. But if you run a modified version as a network service, AGPL section 13 requires you to offer that service's users the complete corresponding source of your modification. Deleting the branding and putting it back online as a closed product is not permitted.
+
+A separate **commercial license** is available for anyone who wants to build on this code without the AGPL's source-disclosure obligation. Contact <hxangel@gmail.com>.
+
+Contributions are accepted under the [Contributor License Agreement](CLA.md), which is what makes the dual licensing possible.
