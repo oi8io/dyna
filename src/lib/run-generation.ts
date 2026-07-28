@@ -77,6 +77,16 @@ export function watchGeneration({
       `/api/projects/${projectId}/generate/stream?runId=${encodeURIComponent(runId)}`,
     );
     let settled = false;
+    /**
+     * Whether the stream ever produced anything.
+     *
+     * `EventSource` exposes neither the status code nor the body, so a 410 for
+     * a run the server no longer holds is indistinguishable from a dropped
+     * network — except by this. The route always leads with a frame: a resuming
+     * caller gets what it missed, a fresh one gets a snapshot. Closing without a
+     * single frame therefore means the request itself was refused.
+     */
+    let receivedAny = false;
 
     const finish = (outcome: GenerationOutcome) => {
       if (settled) return;
@@ -94,6 +104,7 @@ export function watchGeneration({
       } catch {
         return;
       }
+      receivedAny = true;
       onEvent(event);
       if (event.type === "done") finish({ ok: true });
       if (event.type === "error") finish({ ok: false, errorCode: event.code });
@@ -104,10 +115,13 @@ export function watchGeneration({
     source.onerror = () => {
       // EventSource retries on its own while readyState is CONNECTING. Only a
       // closed source is terminal — and by then the run has either finished or
-      // been evicted, so the page reload below picks up the real state.
+      // been evicted, so a reload picks up the real state.
       onConnectionChange?.(false);
       if (source.readyState === EventSource.CLOSED) {
-        finish({ ok: false, errorCode: "connection_lost" });
+        finish({
+          ok: false,
+          errorCode: receivedAny ? "connection_lost" : "run_finished",
+        });
       }
     };
   });

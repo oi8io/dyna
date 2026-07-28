@@ -41,6 +41,7 @@ export default async function BuilderProjectPage({
     { data: messagesData },
     { data: publishedData },
     { data: failedJob },
+    { data: activeJob },
   ] = await Promise.all([
     project.current_version_id
       ? supabase
@@ -75,6 +76,22 @@ export default async function BuilderProjectPage({
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle(),
+    // A run still going. The generation outlives the request that started it,
+    // so closing the tab never stopped it — but the browser only ever learned
+    // the run's id from the response to that request, so a reopened page had no
+    // way to ask about it and sat there looking idle.
+    //
+    // `generation_jobs_resumable_idx` covers exactly this predicate. Demo runs
+    // reserve nothing and write no job row, so they are not resumable; they
+    // finish in seconds, where a reload shows the result anyway.
+    supabase
+      .from("generation_jobs")
+      .select("id")
+      .eq("project_id", project.id)
+      .not("stage", "in", '("succeeded","failed")')
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
   ]);
 
   const version = versionData as ProjectVersion | null;
@@ -82,7 +99,9 @@ export default async function BuilderProjectPage({
 
   // Zero messages means nothing has ever been attempted for this project — the
   // user just created it and was sent straight here. A failed run leaves both a
-  // user and an assistant turn behind, so this cannot re-trigger on a retry.
+  // user and an assistant turn behind, so this cannot re-trigger on a retry,
+  // and a run in flight has already written its user turn, so reopening the
+  // page mid-generation reattaches rather than starting a second one.
   const autoStart = !version && messages.length === 0;
 
   return (
@@ -97,6 +116,7 @@ export default async function BuilderProjectPage({
       publishedSlug={publishedData?.slug}
       publishedVisibility={publishedData?.visibility}
       lastErrorCode={failedJob?.error_code ?? undefined}
+      activeRunId={activeJob?.id ?? undefined}
     />
   );
 }

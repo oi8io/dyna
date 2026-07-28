@@ -10,6 +10,9 @@ export const dynamic = "force-dynamic";
 
 const paramsSchema = z.object({ id: z.uuid() });
 
+/** Comfortably inside the 60s idle timeout most proxies default to. */
+const HEARTBEAT_MS = 20_000;
+
 /**
  * Watches a running generation. Safe to open, drop and reopen.
  *
@@ -73,9 +76,20 @@ export async function GET(
       };
 
       // Catch up first, then follow.
-      const missed = run.since(resumeFrom);
-      const firstSeq = run.seq - missed.length + 1;
-      missed.forEach((event, index) => write(event, firstSeq + index));
+      if (resumeFrom > 0) {
+        // A reconnecting `EventSource` knows what it already has, so it gets
+        // only what it missed and its own state stays intact.
+        const missed = run.since(resumeFrom);
+        const firstSeq = run.seq - missed.length + 1;
+        missed.forEach((event, index) => write(event, firstSeq + index));
+      } else {
+        // A caller starting from nothing — a reopened page, most often. Raw
+        // replay is not enough here: history is capped, so by this point the
+        // plan and the earliest files may have been evicted. The folded
+        // snapshot carries the same result in one frame, tagged with the
+        // sequence it summarises so a later drop resumes from the right place.
+        write({ type: "snapshot", state: run.snapshot() }, run.seq);
+      }
 
       if (run.status !== "running") {
         closed = true;
@@ -83,20 +97,41 @@ export async function GET(
         return;
       }
 
-      const unsubscribe = run.subscribe((event, seq) => {
+      /**
+       * Keeps the connection alive through a quiet stretch.
+       *
+       * Planning is a single model call that can run for a minute with nothing
+       * to report, and an idle proxy in front of the app will close the socket
+       * well before that. A comment frame never reaches `onmessage`, so it
+       * costs the client nothing to ignore.
+       */
+      const heartbeat = setInterval(() => {
+        if (closed) return;
+        try {
+          controller.enqueue(encoder.encode(": keep-alive\n\n"));
+        } catch {
+          closed = true;
+        }
+      }, HEARTBEAT_MS);
+      heartbeat.unref?.();
+
+      let unsubscribe = () => {};
+      const stop = () => {
+        clearInterval(heartbeat);
+        unsubscribe();
+        closed = true;
+      };
+
+      unsubscribe = run.subscribe((event, seq) => {
         write(event, seq);
         if (event.type === "done" || event.type === "error") {
-          unsubscribe();
-          closed = true;
+          stop();
           controller.close();
         }
       });
 
       // Client navigated away or the connection dropped. The run continues.
-      request.signal.addEventListener("abort", () => {
-        unsubscribe();
-        closed = true;
-      });
+      request.signal.addEventListener("abort", stop);
     },
   });
 

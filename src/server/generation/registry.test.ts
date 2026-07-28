@@ -115,3 +115,86 @@ describe("generation registry", () => {
     expect(getRun("missing")).toBeUndefined();
   });
 });
+
+/**
+ * Reopening the builder mid-run attaches with nothing to resume from, and raw
+ * replay cannot serve it: history is capped, so by then the plan and the first
+ * files are gone. The snapshot is folded as events arrive precisely so that
+ * what a late subscriber gets does not depend on how long the run has been
+ * going.
+ */
+describe("snapshot for a subscriber that arrives late", () => {
+  it("carries what the raw event window no longer holds", () => {
+    const { emit } = startRun("job-1");
+    emit({ type: "phase", phase: "planning" });
+    emit({
+      type: "plan",
+      understanding: "a breakout clone",
+      changes: [{ path: "src/App.tsx", intent: "shell" }],
+      assumptions: ["three lives"],
+    });
+    emit({ type: "file-open", path: "src/App.tsx" });
+    emit({ type: "file-delta", path: "src/App.tsx", text: "export " });
+
+    // Enough deltas to push every event above out of the retained window.
+    for (let i = 0; i < 4200; i += 1) {
+      emit({ type: "file-delta", path: "src/App.tsx", text: "x" });
+    }
+
+    const run = getRun("job-1");
+    const oldest = run?.since(0) ?? [];
+    // The window really has dropped the plan — otherwise this proves nothing.
+    expect(oldest.some((event) => event.type === "plan")).toBe(false);
+
+    const snapshot = run!.snapshot();
+    expect(snapshot.understanding).toBe("a breakout clone");
+    expect(snapshot.assumptions).toEqual(["three lives"]);
+    expect(snapshot.changes).toHaveLength(1);
+    expect(snapshot.order).toEqual(["src/App.tsx"]);
+    expect(snapshot.activePath).toBe("src/App.tsx");
+    // Every delta, including the ones no longer replayable.
+    expect(snapshot.drafts["src/App.tsx"]).toBe(`export ${"x".repeat(4200)}`);
+  });
+
+  it("accumulates several files independently", () => {
+    const { emit } = startRun("job-1");
+    emit({ type: "file-open", path: "a.ts" });
+    emit({ type: "file-delta", path: "a.ts", text: "one" });
+    emit({ type: "file-close", path: "a.ts" });
+    emit({ type: "file-open", path: "b.ts" });
+    emit({ type: "file-delta", path: "b.ts", text: "two" });
+
+    const snapshot = getRun("job-1")!.snapshot();
+    expect(snapshot.order).toEqual(["a.ts", "b.ts"]);
+    expect(snapshot.drafts).toEqual({ "a.ts": "one", "b.ts": "two" });
+    expect(snapshot.activePath).toBe("b.ts");
+  });
+
+  it("records how a finished run ended", () => {
+    const { emit } = startRun("done-job");
+    emit({ type: "done", versionNumber: 3, provider: "deepseek" });
+    const done = getRun("done-job")!.snapshot();
+    expect(done.status).toBe("done");
+    expect(done.versionNumber).toBe(3);
+    expect(done.activePath).toBeUndefined();
+
+    const { emit: emitFailure } = startRun("failed-job");
+    emitFailure({ type: "file-open", path: "a.ts" });
+    emitFailure({ type: "error", code: "plan_timed_out" });
+    const failed = getRun("failed-job")!.snapshot();
+    expect(failed.status).toBe("error");
+    expect(failed.errorCode).toBe("plan_timed_out");
+    // A run that stopped is not still writing a file.
+    expect(failed.activePath).toBeUndefined();
+  });
+
+  it("keeps the phase, and whether that phase was inherited", () => {
+    const { emit } = startRun("job-1");
+    emit({ type: "phase", phase: "planning", resumed: true });
+    expect(getRun("job-1")!.snapshot().phaseResumed).toBe(true);
+    emit({ type: "phase", phase: "writing" });
+    const snapshot = getRun("job-1")!.snapshot();
+    expect(snapshot.phase).toBe("writing");
+    expect(snapshot.phaseResumed).toBe(false);
+  });
+});

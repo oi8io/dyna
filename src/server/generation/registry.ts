@@ -1,4 +1,9 @@
-import type { GenerationEvent } from "@/lib/generation-events";
+import {
+  EMPTY_SNAPSHOT,
+  type GenerationEvent,
+  type GenerationSnapshot,
+  foldGenerationEvent,
+} from "@/lib/generation-events";
 
 /**
  * In-process registry of running generations.
@@ -12,18 +17,15 @@ import type { GenerationEvent } from "@/lib/generation-events";
  * that arrives late — or returns after a dropped connection — is handed a
  * snapshot of everything so far and then continues live.
  *
+ * The snapshot is folded as events arrive rather than reconstructed from the
+ * retained ones. History is capped, so a page reopened partway through a run
+ * would otherwise be caught up from a window that no longer contains the plan
+ * or the first files — the very things it needs.
+ *
  * Single-process by design. Two replicas would each hold their own registry and
  * a reconnect could land on the wrong one, so the deployment runs one instance;
  * a restart loses in-flight runs, which `reap_stale_generations` settles.
  */
-
-export interface RunSnapshot {
-  status: "running" | "done" | "error";
-  /** Events replayed to a subscriber so it can rebuild state from scratch. */
-  events: GenerationEvent[];
-  /** Sequence number of the last event, for resuming after a drop. */
-  seq: number;
-}
 
 type Subscriber = (event: GenerationEvent, seq: number) => void;
 
@@ -38,10 +40,14 @@ const MAX_RETAINED_EVENTS = 4000;
 
 class Run {
   readonly events: GenerationEvent[] = [];
-  status: RunSnapshot["status"] = "running";
+  snapshot: GenerationSnapshot = EMPTY_SNAPSHOT;
   seq = 0;
   private readonly subscribers = new Set<Subscriber>();
   private evictAt?: ReturnType<typeof setTimeout>;
+
+  get status() {
+    return this.snapshot.status;
+  }
 
   emit(event: GenerationEvent) {
     this.seq += 1;
@@ -49,8 +55,7 @@ class Run {
     if (this.events.length > MAX_RETAINED_EVENTS) {
       this.events.splice(0, this.events.length - MAX_RETAINED_EVENTS);
     }
-    if (event.type === "done") this.status = "done";
-    if (event.type === "error") this.status = "error";
+    this.snapshot = foldGenerationEvent(this.snapshot, event);
 
     for (const subscriber of this.subscribers) {
       // One failing subscriber must not stop the others, or the run itself.
@@ -103,6 +108,8 @@ export function getRun(jobId: string) {
   return {
     status: run.status,
     seq: run.seq,
+    /** Everything so far, for a subscriber with nothing to resume from. */
+    snapshot: () => run.snapshot,
     since: (afterSeq: number) => run.since(afterSeq),
     subscribe: (subscriber: Subscriber) => run.subscribe(subscriber),
   };

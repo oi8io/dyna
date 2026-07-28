@@ -8,6 +8,7 @@ import {
   Send,
   SquareTerminal,
 } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useRef, useState } from "react";
 
 import { ClarificationPanel } from "@/components/builder/clarification-panel";
@@ -46,6 +47,14 @@ interface BuilderShellProps {
    * of waiting on the previous page for a finished result.
    */
   autoStart?: boolean;
+  /**
+   * A generation that was already running when this page loaded.
+   *
+   * The run outlives the request that started it, so closing the tab never
+   * stopped it — but the run's id only ever came back in that request's
+   * response, so a reopened page had no way to ask about it.
+   */
+  activeRunId?: string;
 }
 
 /**
@@ -101,21 +110,26 @@ export function BuilderShell({
   publishedVisibility,
   lastErrorCode,
   autoStart = false,
+  activeRunId,
 }: BuilderShellProps) {
   const t = useT();
+  const router = useRouter();
   const { intl } = useLocale();
   const [messages, setMessages] = useState(initialMessages);
   const [prompt, setPrompt] = useState("");
   const [selectedFile, setSelectedFile] = useState(files[0]?.path);
+  // A run that is about to start, or already going, belongs on the editor: the
+  // point is watching the code arrive. Derived at first render rather than
+  // switched from an effect, so there is no frame of the preview pane first.
   const [workspaceTab, setWorkspaceTab] = useState<
     "preview" | "code" | "console"
-  >("preview");
+  >(activeRunId || autoStart ? "code" : "preview");
   // A project with no runnable version keeps the same layout; only the right
   // pane changes. Replacing the whole screen with a recovery card threw away
   // the conversation, which is where the failure was actually explained.
   const hasVersion = Boolean(artifactHtml);
   const failure = findFailure(initialMessages);
-  const { state: stream, start } = useGenerationStream();
+  const { state: stream, start, resume } = useGenerationStream();
   const busy = stream.busy;
   const errorCode = stream.errorCode;
   // A resumed stage says so; otherwise the plain label for the phase.
@@ -178,13 +192,45 @@ export function BuilderShell({
     await submitTurn(content);
   }
 
-  // Fires once. The ref guards against React's development double-invoke, which
-  // would otherwise start two generations and burn two reservations.
+  /**
+   * Reattaches to a run that was already going.
+   *
+   * The stream leads with a snapshot of everything so far, so the editor fills
+   * in at once rather than from the moment of arrival. Reaching the end is
+   * handled the same way as a turn started here: the server owns the files and
+   * the version, so a reload is what picks them up.
+   */
+  async function reattach(runId: string) {
+    const result = await resume(project.id, runId);
+    if (result.ok) {
+      window.location.reload();
+      return;
+    }
+    // The run ended between the page being rendered and the stream opening, or
+    // the process holding it restarted. Either way the database already knows
+    // the outcome and an error banner would be describing a stale race.
+    if (result.errorCode === "run_finished") router.refresh();
+  }
+
+  // Each fires once. The refs guard against React's development double-invoke,
+  // which would otherwise open two streams — or, worse, start two generations
+  // and burn two reservations.
+  const attached = useRef(false);
+  useEffect(() => {
+    if (!activeRunId || attached.current) return;
+    attached.current = true;
+    void reattach(activeRunId);
+    // reattach is stable for this purpose: it only reads props.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeRunId]);
+
   const autoStarted = useRef(false);
   useEffect(() => {
-    if (!autoStart || autoStarted.current) return;
+    // `activeRunId` wins. A project with a run in flight has already written its
+    // user turn, so autoStart is false by then and the two cannot both fire —
+    // but a second reservation is expensive enough to guard against anyway.
+    if (!autoStart || autoStarted.current || activeRunId) return;
     autoStarted.current = true;
-    setWorkspaceTab("code");
     void submitTurn(project.original_prompt);
     // submitTurn is stable for this purpose: it only reads state the first run
     // cannot have changed yet.
