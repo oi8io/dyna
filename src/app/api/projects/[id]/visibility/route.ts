@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
+import { apiError } from "@/lib/api-error";
 import { createClient } from "@/lib/supabase/server";
 
 const paramsSchema = z.object({ id: z.uuid() });
@@ -22,7 +23,7 @@ export async function PATCH(
   const params = paramsSchema.safeParse(await context.params);
   const body = bodySchema.safeParse(await request.json());
   if (!params.success || !body.success) {
-    return NextResponse.json({ error: "请求参数无效。" }, { status: 400 });
+    return apiError("invalid_request", 400);
   }
 
   const supabase = await createClient();
@@ -30,7 +31,7 @@ export async function PATCH(
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) {
-    return NextResponse.json({ error: "请先登录。" }, { status: 401 });
+    return apiError("not_authenticated", 401);
   }
 
   // RLS (`published_owner_update`) restricts this to rows the caller owns; the
@@ -43,13 +44,10 @@ export async function PATCH(
     .select("slug");
 
   if (error) {
-    return NextResponse.json({ error: "更新失败，请重试。" }, { status: 500 });
+    return apiError("visibility_update_failed", 500);
   }
   if (!data?.length) {
-    return NextResponse.json(
-      { error: "这个作品还没有发布过。" },
-      { status: 409 },
-    );
+    return apiError("not_published", 409);
   }
 
   return NextResponse.json({

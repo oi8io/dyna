@@ -61,7 +61,7 @@ async function validateInVercelSandbox(
       artifactHtml: builtHtml,
       executor: "vercel-sandbox",
       logs: [
-        { level: "info", message: "固定依赖安装完成。" },
+        { level: "info", message: "Pinned dependencies installed." },
         { level: "info", message: output.trim() },
       ],
     };
@@ -82,7 +82,7 @@ export async function buildGeneratedWorkspace(
       logs: [
         {
           level: "info",
-          message: "Fake Provider 工程源码已校验，并加载确定性的预构建产物。",
+          message: "Fake provider source validated; loaded the deterministic prebuilt artifact.",
         },
       ],
     };

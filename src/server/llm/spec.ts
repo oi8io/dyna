@@ -13,11 +13,29 @@ import type { GeneratedWorkspace } from "@/server/workspace/schema";
  * Deliberately intent-only. Directory trees, file inventories and tech stacks
  * are mechanically derivable and go stale the moment someone forgets to update
  * them, at which point they mislead rather than inform.
+ *
+ * The scaffolding — headings, placeholders, the changelog anchor — is English
+ * and stays English in every locale. The content inside it is whatever language
+ * the user wrote in. That split is what keeps `extractChangelog` working: a
+ * translated heading would be a different anchor, so switching languages would
+ * silently drop the history of a project rather than translate it.
  */
 
 export const SPEC_PATH = "SPEC.md";
 
-const CHANGELOG_HEADING = "## 改动记录";
+const CHANGELOG_HEADING = "## Changelog";
+
+/**
+ * Anchors that have ever marked the changelog.
+ *
+ * The Chinese heading is what projects created before the split still carry,
+ * and their history has to survive the first edit made after it.
+ */
+const CHANGELOG_HEADINGS = [CHANGELOG_HEADING, "## 改动记录"];
+
+const EMPTY_BULLET = "- None yet";
+/** The same placeholder as written by earlier versions. */
+const EMPTY_BULLETS = new Set([EMPTY_BULLET, "- 暂无"]);
 
 export const projectSpecSchema = z.object({
   /** The experience the project is going for, not its feature list. */
@@ -43,7 +61,7 @@ export const projectSpecSchema = z.object({
 export type ProjectSpec = z.infer<typeof projectSpecSchema>;
 
 function bullets(items: string[]) {
-  return items.length ? items.map((item) => `- ${item}`).join("\n") : "- 暂无";
+  return items.length ? items.map((item) => `- ${item}`).join("\n") : EMPTY_BULLET;
 }
 
 /**
@@ -59,50 +77,54 @@ export function renderSpecMarkdown(
 ): string {
   const decisions = spec.decisions.length
     ? spec.decisions
-        .map((entry) => `- ${entry.decision}\n  - 原因：${entry.why}`)
+        .map((entry) => `- ${entry.decision}\n  - Why: ${entry.why}`)
         .join("\n")
-    : "- 暂无";
+    : EMPTY_BULLET;
 
-  return `# 项目意图
+  return `# Project intent
 
-> 这份文件记录这个作品「想成为什么」，而不是「现在是什么」。
-> 代码由构建产物负责说明；目录结构和技术栈可以机械推导，因此不写在这里。
+> What this project is trying to be, not what it currently is.
+> The build output speaks for the code; directory structure and tech stack are
+> mechanically derivable and are deliberately not recorded here.
 
-## 目标体验
+## Target experience
 
 ${spec.goal}
 
-## 核心循环
+## Core loop
 
 ${spec.coreLoop}
 
-## 硬性约束
+## Hard constraints
 
 ${bullets(spec.constraints)}
 
-## 已做的决定
+## Decisions made
 
 ${decisions}
 
-## 待确认
+## Open questions
 
 ${bullets(spec.openQuestions)}
 
 ${CHANGELOG_HEADING}
 
-${changelog.length ? changelog.join("\n") : "- 暂无"}
+${changelog.length ? changelog.join("\n") : EMPTY_BULLET}
 `;
 }
 
 /** Pulls the accumulated changelog out of a previously rendered spec. */
 export function extractChangelog(markdown: string): string[] {
-  const index = markdown.indexOf(CHANGELOG_HEADING);
-  if (index === -1) return [];
-  return markdown
-    .slice(index + CHANGELOG_HEADING.length)
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line.startsWith("- ") && line !== "- 暂无");
+  for (const heading of CHANGELOG_HEADINGS) {
+    const index = markdown.indexOf(heading);
+    if (index === -1) continue;
+    return markdown
+      .slice(index + heading.length)
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line.startsWith("- ") && !EMPTY_BULLETS.has(line));
+  }
+  return [];
 }
 
 export function appendChangelog(

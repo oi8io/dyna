@@ -45,14 +45,14 @@ export function normalizeWorkspacePath(path: string) {
     normalized.split("/").includes("..") ||
     normalized.split("/").includes(".")
   ) {
-    throw new WorkspaceValidationError(`不安全的文件路径：${path}`);
+    throw new WorkspaceValidationError(`Unsafe file path: ${path}`);
   }
 
   if (
     !ALLOWED_ROOT_FILES.has(normalized) &&
     !ALLOWED_DIRECTORIES.some((directory) => normalized.startsWith(directory))
   ) {
-    throw new WorkspaceValidationError(`文件不在允许目录中：${path}`);
+    throw new WorkspaceValidationError(`File is outside the allowed directories: ${path}`);
   }
 
   return normalized;
@@ -66,7 +66,7 @@ export function validateWorkspace(input: unknown): GeneratedWorkspace {
   const files = workspace.files.map((file) => {
     const path = normalizeWorkspacePath(file.path);
     if (seen.has(path)) {
-      throw new WorkspaceValidationError(`重复的文件路径：${path}`);
+      throw new WorkspaceValidationError(`Duplicate file path: ${path}`);
     }
     seen.add(path);
     totalBytes += new TextEncoder().encode(file.content).byteLength;
@@ -74,10 +74,10 @@ export function validateWorkspace(input: unknown): GeneratedWorkspace {
   });
 
   if (!seen.has("index.html")) {
-    throw new WorkspaceValidationError("生成结果必须包含 index.html");
+    throw new WorkspaceValidationError("The generated workspace must contain index.html");
   }
   if (totalBytes > MAX_WORKSPACE_BYTES) {
-    throw new WorkspaceValidationError("生成结果超过工作区大小上限");
+    throw new WorkspaceValidationError("The generated workspace exceeds the size limit");
   }
 
   return { ...workspace, files };
@@ -113,10 +113,10 @@ export function validateAgentFiles(input: unknown) {
       !EDITABLE_EXACT_PATHS.has(path) &&
       !EDITABLE_DIRECTORIES.some((directory) => path.startsWith(directory))
     ) {
-      throw new WorkspaceValidationError(`Agent 无权修改模板文件：${path}`);
+      throw new WorkspaceValidationError(`The agent may not modify the template file: ${path}`);
     }
     if (seen.has(path)) {
-      throw new WorkspaceValidationError(`重复的文件路径：${path}`);
+      throw new WorkspaceValidationError(`Duplicate file path: ${path}`);
     }
     seen.add(path);
     return { ...file, path };
@@ -149,7 +149,7 @@ export function mergeAgentFiles(
   for (const path of deleted) {
     const normalized = normalizeWorkspacePath(path);
     if (!isEditableAgentPath(normalized)) {
-      throw new WorkspaceValidationError(`Agent 无权删除模板文件：${path}`);
+      throw new WorkspaceValidationError(`The agent may not delete the template file: ${path}`);
     }
     merged.delete(normalized);
   }
@@ -159,7 +159,7 @@ export function mergeAgentFiles(
 
   const files = [...merged.values()];
   if (!files.length) {
-    throw new WorkspaceValidationError("合并后没有任何可编辑文件");
+    throw new WorkspaceValidationError("The merge left no editable files");
   }
   // Re-validating the merged set keeps the whitelist authoritative even when
   // the carried-over half came from an older, differently-validated version.

@@ -2,6 +2,8 @@
 
 import { LoaderCircle } from "lucide-react";
 
+import { useT } from "@/lib/i18n/client";
+
 /**
  * The official Google "G", unaltered.
  *
@@ -56,6 +58,8 @@ export function GoogleSignInButton({
   disabled: boolean;
   onClick: () => void;
 }) {
+  const t = useT();
+
   return (
     <button
       type="button"
@@ -81,7 +85,7 @@ export function GoogleSignInButton({
       ) : (
         <GoogleLogo />
       )}
-      使用 Google 账号登录
+      {t.login.google}
     </button>
   );
 }

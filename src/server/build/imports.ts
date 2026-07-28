@@ -76,7 +76,7 @@ export function describeUnresolvedImports(problems: UnresolvedImport[]) {
   return problems
     .map(
       (problem) =>
-        `${problem.from} 引用了 "${problem.specifier}"，解析为 ${problem.resolved}，但工程里没有这个文件。`,
+        `${problem.from} imports "${problem.specifier}", which resolves to ${problem.resolved}, but no such file exists in the project.`,
     )
     .join("\n");
 }

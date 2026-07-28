@@ -43,7 +43,7 @@ describe("workspace path isolation", () => {
       validateAgentFiles([
         { path: "package.json", content: '{"scripts":{"pwn":"..."}}' },
       ]),
-    ).toThrow("无权修改");
+    ).toThrow("may not modify the template file");
   });
 
   it("identifies which agent-supplied paths are editable", () => {

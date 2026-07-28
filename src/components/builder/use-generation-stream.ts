@@ -13,7 +13,8 @@ import { runGeneration } from "@/lib/run-generation";
 export interface GenerationStreamState {
   busy: boolean;
   phase?: GenerationPhase;
-  phaseLabel?: string;
+  /** True when the current phase was inherited from an earlier attempt. */
+  phaseResumed: boolean;
   /** What the agent understood the request to mean. */
   understanding?: string;
   /** Files the plan said it would touch. */
@@ -33,11 +34,13 @@ export interface GenerationStreamState {
   /** The file currently being written, if any. */
   activePath?: string;
   logs: string[];
-  error?: string;
+  /** A key into the dictionary's `errors` table, not a sentence. */
+  errorCode?: string;
 }
 
 const IDLE: GenerationStreamState = {
   busy: false,
+  phaseResumed: false,
   changes: [],
   assumptions: [],
   questions: [],
@@ -55,7 +58,11 @@ export function useGenerationStream() {
     setState((current) => {
       switch (event.type) {
         case "phase":
-          return { ...current, phase: event.phase, phaseLabel: event.message };
+          return {
+            ...current,
+            phase: event.phase,
+            phaseResumed: event.resumed ?? false,
+          };
         case "plan":
           return {
             ...current,
@@ -95,7 +102,7 @@ export function useGenerationStream() {
         case "log":
           return { ...current, logs: [...current.logs, event.message] };
         case "error":
-          return { ...current, error: event.message, activePath: undefined };
+          return { ...current, errorCode: event.code, activePath: undefined };
         case "done":
           return { ...current, activePath: undefined };
       }
@@ -119,7 +126,9 @@ export function useGenerationStream() {
         ...current,
         busy: false,
         connected: true,
-        error: result.ok ? undefined : (result.error ?? current.error),
+        errorCode: result.ok
+          ? undefined
+          : (result.errorCode ?? current.errorCode),
       }));
       return result;
     },

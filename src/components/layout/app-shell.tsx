@@ -12,8 +12,10 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
 
+import { LocaleSwitcher } from "@/components/layout/locale-switcher";
 import { UserCard, type UserCardProps } from "@/components/layout/user-card";
 import { buttonVariants } from "@/components/ui/button";
+import { useT } from "@/lib/i18n/client";
 import { cn } from "@/lib/utils";
 
 export interface RecentProject {
@@ -26,10 +28,11 @@ interface AppShellProps extends UserCardProps {
   children: React.ReactNode;
 }
 
+/** Icons and routes are fixed; labels come from the dictionary at render. */
 const SECTIONS = [
-  { href: "/builder", label: "作品", icon: LayoutGrid },
-  { href: "/artifacts", label: "已发布", icon: Share2 },
-  { href: "/usage", label: "额度与用量", icon: Gauge },
+  { href: "/builder", key: "projects", icon: LayoutGrid },
+  { href: "/artifacts", key: "published", icon: Share2 },
+  { href: "/usage", key: "usage", icon: Gauge },
 ] as const;
 
 /** The builder is a two-pane IDE; a full sidebar there would crowd it out. */
@@ -38,6 +41,7 @@ function isWorkbench(pathname: string) {
 }
 
 export function AppShell({ recent, children, ...user }: AppShellProps) {
+  const t = useT();
   const pathname = usePathname();
   const [manual, setManual] = useState<boolean>();
   // Collapsed by default inside the workbench, expanded everywhere else, and
@@ -69,7 +73,7 @@ export function AppShell({ recent, children, ...user }: AppShellProps) {
         <div className={cn("shrink-0", collapsed ? "px-2" : "px-3")}>
           <Link
             href="/builder/new"
-            title="新建作品"
+            title={t.nav.newProject}
             className={cn(
               buttonVariants({ size: "sm" }),
               "w-full",
@@ -77,7 +81,7 @@ export function AppShell({ recent, children, ...user }: AppShellProps) {
             )}
           >
             <Plus className="size-4" />
-            {!collapsed && "新建作品"}
+            {!collapsed && t.nav.newProject}
           </Link>
         </div>
 
@@ -86,11 +90,12 @@ export function AppShell({ recent, children, ...user }: AppShellProps) {
             const active =
               pathname === section.href ||
               pathname.startsWith(`${section.href}/`);
+            const label = t.nav[section.key];
             return (
               <Link
                 key={section.href}
                 href={section.href}
-                title={section.label}
+                title={label}
                 className={cn(
                   "flex h-9 items-center gap-2.5 rounded-md text-sm transition-colors",
                   collapsed ? "justify-center" : "px-2.5",
@@ -100,7 +105,7 @@ export function AppShell({ recent, children, ...user }: AppShellProps) {
                 )}
               >
                 <section.icon className="size-4 shrink-0" />
-                {!collapsed && section.label}
+                {!collapsed && label}
               </Link>
             );
           })}
@@ -108,7 +113,7 @@ export function AppShell({ recent, children, ...user }: AppShellProps) {
 
         {!collapsed && recent.length > 0 && (
           <div className="scrollbar-thin mt-6 min-h-0 flex-1 overflow-y-auto px-3">
-            <p className="px-2.5 pb-1 text-xs text-ink-faint">最近</p>
+            <p className="px-2.5 pb-1 text-xs text-ink-faint">{t.nav.recent}</p>
             {recent.map((project) => (
               <Link
                 key={project.id}
@@ -130,15 +135,22 @@ export function AppShell({ recent, children, ...user }: AppShellProps) {
         {/* The toggle sits in one fixed spot in both states. Moving it from the
             header to the footer on collapse meant hunting for it, which is
             exactly what a collapsed sidebar should not require. */}
-        <div className="mt-auto shrink-0 px-2 pb-1">
+        <div
+          className={cn(
+            "mt-auto flex shrink-0 items-center gap-1 px-2 pb-1",
+            collapsed && "flex-col",
+          )}
+        >
           <button
             onClick={() => setManual(!collapsed)}
-            aria-label={collapsed ? "展开侧栏" : "收起侧栏"}
+            aria-label={collapsed ? t.nav.expand : t.nav.collapse}
             aria-expanded={!collapsed}
-            title={collapsed ? "展开侧栏" : "收起侧栏"}
+            title={collapsed ? t.nav.expand : t.nav.collapse}
             className={cn(
-              "flex h-9 w-full items-center gap-2.5 rounded-md text-[13px] text-ink-soft transition-colors hover:bg-surface hover:text-ink",
-              collapsed ? "justify-center" : "px-2.5",
+              "flex h-9 items-center gap-2.5 rounded-md text-[13px] text-ink-soft transition-colors hover:bg-surface hover:text-ink",
+              // Side by side with the language button when there is room; the
+              // rail stacks them instead, so each takes the full width there.
+              collapsed ? "w-full justify-center" : "min-w-0 flex-1 px-2.5",
             )}
           >
             {collapsed ? (
@@ -146,10 +158,13 @@ export function AppShell({ recent, children, ...user }: AppShellProps) {
             ) : (
               <>
                 <ChevronsLeft className="size-4 shrink-0" />
-                收起侧栏
+                {t.nav.collapse}
               </>
             )}
           </button>
+          {/* Last here too, matching the header. `align="end"` keeps the list
+              inside the sidebar now that it hangs off the right edge. */}
+          <LocaleSwitcher side="top" align="end" />
         </div>
 
         <div className="shrink-0">

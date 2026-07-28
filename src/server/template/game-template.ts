@@ -1,3 +1,4 @@
+import { type Locale, detectContentLocale } from "@/lib/i18n/config";
 import type { GeneratedWorkspace } from "@/server/workspace/schema";
 import { validateWorkspace } from "@/server/workspace/schema";
 
@@ -98,22 +99,40 @@ createRoot(document.getElementById("root")!).render(<React.StrictMode><App /></R
  * Anything the agent writes replaces these. They exist so that a build is
  * always possible, not so that anyone ships them.
  */
-const FALLBACK_FILES: GeneratedWorkspace["files"] = [
-  {
-    path: "src/App.tsx",
-    content: `export default function App() {
+const FALLBACK_COPY = {
+  "zh-CN": {
+    heading: "还没有内容",
+    body: "这一版没有生成游戏主体，继续对话再试一次。",
+  },
+  en: {
+    heading: "Nothing here yet",
+    body: "This version produced no game. Keep the conversation going and try again.",
+  },
+} as const;
+
+/**
+ * The placeholder is the one thing here the user might actually read, so it
+ * follows the language they wrote in — inferred from the project's own name and
+ * summary, since this module never sees the request.
+ */
+function fallbackFiles(locale: Locale): GeneratedWorkspace["files"] {
+  const copy = FALLBACK_COPY[locale];
+  return [
+    {
+      path: "src/App.tsx",
+      content: `export default function App() {
   return (
     <main className="game-shell">
-      <h1>还没有内容</h1>
-      <p>这一版没有生成游戏主体，继续对话再试一次。</p>
+      <h1>${copy.heading}</h1>
+      <p>${copy.body}</p>
     </main>
   );
 }
 `,
-  },
-  {
-    path: "src/styles.css",
-    content: `.game-shell {
+    },
+    {
+      path: "src/styles.css",
+      content: `.game-shell {
   display: grid;
   place-items: center;
   gap: 8px;
@@ -123,8 +142,9 @@ const FALLBACK_FILES: GeneratedWorkspace["files"] = [
   text-align: center;
 }
 `,
-  },
-];
+    },
+  ];
+}
 
 export function createGameWorkspace(input: {
   title: string;
@@ -133,7 +153,12 @@ export function createGameWorkspace(input: {
 }) {
   // Later entries win, and duplicates would fail validation outright.
   const byPath = new Map<string, GeneratedWorkspace["files"][number]>();
-  for (const file of [...TEMPLATE_FILES, ...FALLBACK_FILES, ...input.agentFiles]) {
+  const locale = detectContentLocale(`${input.title} ${input.summary}`);
+  for (const file of [
+    ...TEMPLATE_FILES,
+    ...fallbackFiles(locale),
+    ...input.agentFiles,
+  ]) {
     byPath.set(file.path, file);
   }
 

@@ -18,6 +18,8 @@ import { CodeView } from "@/components/code/code-view";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { useLocale, useT } from "@/lib/i18n/client";
+import { translateError } from "@/lib/i18n/dictionary";
 import type {
   Json,
   Message,
@@ -63,7 +65,10 @@ function findFailure(messages: Message[]) {
       meta.error === true
     ) {
       return {
-        message: message.content,
+        // Runs record a code; rows written before they did hold a sentence,
+        // which `translateError` passes through as unrecognised.
+        code:
+          typeof meta.errorCode === "string" ? meta.errorCode : message.content,
         detail: typeof meta.detail === "string" ? meta.detail : undefined,
         at: message.created_at,
       };
@@ -97,6 +102,8 @@ export function BuilderShell({
   lastErrorCode,
   autoStart = false,
 }: BuilderShellProps) {
+  const t = useT();
+  const { intl } = useLocale();
   const [messages, setMessages] = useState(initialMessages);
   const [prompt, setPrompt] = useState("");
   const [selectedFile, setSelectedFile] = useState(files[0]?.path);
@@ -110,7 +117,12 @@ export function BuilderShell({
   const failure = findFailure(initialMessages);
   const { state: stream, start } = useGenerationStream();
   const busy = stream.busy;
-  const error = stream.error;
+  const errorCode = stream.errorCode;
+  // A resumed stage says so; otherwise the plain label for the phase.
+  const phaseLabel = stream.phase
+    ? ((stream.phaseResumed ? t.resumedPhases[stream.phase] : undefined) ??
+      t.phases[stream.phase])
+    : undefined;
   const messageScrollRef = useRef<HTMLDivElement>(null);
 
   // The conversation scrolls inside its own pane now, so new turns would
@@ -208,18 +220,18 @@ export function BuilderShell({
             {hasVersion ? (
               <>
                 <Badge variant="outline">v{versionNumber}</Badge>
-                <Badge>可运行</Badge>
+                <Badge>{t.builder.runnable}</Badge>
               </>
             ) : (
-              <Badge variant="outline">没有可运行版本</Badge>
+              <Badge variant="outline">{t.builder.noRunnableVersion}</Badge>
             )}
             <Badge variant="outline">
-              {provider === "fake" ? "Fake demo" : "DeepSeek live"}
+              {provider === "fake"
+                ? t.builder.fakeProvider
+                : t.builder.liveProvider}
             </Badge>
           </div>
-          <p className="text-xs text-ink-faint">
-            改砸了不要紧，上一个能玩的版本一直留着。
-          </p>
+          <p className="text-xs text-ink-faint">{t.builder.safetyNote}</p>
         </div>
         {hasVersion && (
           <PublishPanel
@@ -230,18 +242,18 @@ export function BuilderShell({
         )}
       </div>
 
-      {error && (
+      {errorCode && (
         <p className="rounded-lg border border-accent/25 bg-accent-soft px-4 py-3 text-sm text-accent-hover lg:shrink-0">
-          {error}
+          {translateError(t, errorCode)}
         </p>
       )}
 
       <div className="grid gap-4 lg:min-h-0 lg:flex-1 lg:grid-cols-[360px_minmax(0,1fr)]">
         <aside className="flex max-h-[70vh] flex-col overflow-hidden rounded-xl border border-line bg-surface lg:max-h-none lg:min-h-0">
           <div className="flex h-11 shrink-0 items-center border-b border-line px-4 text-sm font-medium text-ink">
-            对话
+            {t.builder.conversation}
             <span className="ml-auto text-xs font-normal text-ink-faint">
-              {messages.length} 条
+              {t.builder.messageCount(messages.length)}
             </span>
           </div>
 
@@ -276,7 +288,7 @@ export function BuilderShell({
                 )}
                 {stream.assumptions.length > 0 && (
                   <div className="border-t border-line pt-2 text-xs text-ink-faint">
-                    <p>以下几点我自己定了，不合适就直接说：</p>
+                    <p>{t.builder.assumptionsIntro}</p>
                     <ul className="mt-1 space-y-0.5">
                       {stream.assumptions.map((assumption) => (
                         <li key={assumption}>· {assumption}</li>
@@ -299,11 +311,11 @@ export function BuilderShell({
               <div className="mr-6 flex items-center gap-2 rounded-lg border border-line bg-canvas-sunken p-3 text-sm text-ink-soft">
                 <LoaderCircle className="size-4 animate-spin" />
                 {stream.connected
-                  ? (stream.phaseLabel ?? "正在处理…")
-                  : "连接断了，正在重连——生成还在继续"}
+                  ? (phaseLabel ?? t.builder.processing)
+                  : t.builder.reconnecting}
                 {stream.connected && stream.thinkingChars > 0 && (
                   <span className="ml-auto font-mono text-xs text-ink-faint">
-                    已推理 {stream.thinkingChars} 字
+                    {t.builder.thinking(stream.thinkingChars)}
                   </span>
                 )}
               </div>
@@ -316,8 +328,8 @@ export function BuilderShell({
               disabled={busy}
               placeholder={
                 hasVersion
-                  ? "接着说，比如：球速再快一点，加个暂停键…"
-                  : "描述你想要的玩法…"
+                  ? t.builder.editPlaceholder
+                  : t.builder.createPlaceholder
               }
               className="min-h-24 resize-none"
             />
@@ -327,7 +339,7 @@ export function BuilderShell({
               disabled={busy || !prompt.trim()}
             >
               <Send className="size-4" />
-              发送
+              {t.builder.send}
             </Button>
           </form>
         </aside>
@@ -336,9 +348,9 @@ export function BuilderShell({
           <div className="flex h-11 shrink-0 items-center gap-1 border-b border-line px-2">
             {(
               [
-                ["preview", "预览", Eye],
-                ["code", "代码", Code2],
-                ["console", "运行信息", SquareTerminal],
+                ["preview", t.builder.tabPreview, Eye],
+                ["code", t.builder.tabCode, Code2],
+                ["console", t.builder.tabConsole, SquareTerminal],
               ] as const
             ).map(([value, label, Icon]) => (
               <button
@@ -362,7 +374,7 @@ export function BuilderShell({
             {busy && (
               <span className="ml-auto flex items-center gap-2 pr-2 text-xs text-ink-soft">
                 <LoaderCircle className="size-3.5 animate-spin" />
-                {stream.phaseLabel ?? "正在生成"}
+                {phaseLabel ?? t.builder.generating}
               </span>
             )}
           </div>
@@ -377,29 +389,31 @@ export function BuilderShell({
             ) : (
               <div className="scrollbar-thin min-h-0 flex-1 overflow-auto p-6">
                 <h2 className="font-serif text-lg text-ink">
-                  这个作品还没有可运行的版本
+                  {t.builder.noVersionTitle}
                 </h2>
                 <p className="mt-2 max-w-xl text-sm leading-6 text-ink-soft">
                   {failure
-                    ? "上一次生成没有完成。原始需求和对话都保留着，修好之后可以直接重试，失败的那次不会重复扣额度。"
-                    : "还没有生成过。在左侧描述你想要的东西就可以开始。"}
+                    ? t.builder.noVersionAfterFailure
+                    : t.builder.noVersionYet}
                 </p>
 
                 {failure && (
                   <div className="mt-5 space-y-3">
                     <div className="rounded-lg border border-accent/25 bg-accent-soft px-4 py-3">
                       <p className="text-sm leading-6 text-accent-hover">
-                        {failure.message}
+                        {translateError(t, failure.code)}
                       </p>
                       <p className="mt-1 text-xs text-accent-hover/70">
-                        {new Date(failure.at).toLocaleString("zh-CN")}
+                        {new Date(failure.at).toLocaleString(intl)}
                         {lastErrorCode ? ` · ${lastErrorCode}` : ""}
                       </p>
                     </div>
 
                     {failure.detail && (
                       <div>
-                        <p className="mb-1.5 text-xs text-ink-faint">详细报错</p>
+                        <p className="mb-1.5 text-xs text-ink-faint">
+                          {t.builder.failureDetail}
+                        </p>
                         <pre className="scrollbar-thin max-h-64 overflow-auto rounded-lg border border-line bg-canvas-sunken p-3 text-[11px] leading-5 text-ink-soft">
                           <code>{failure.detail}</code>
                         </pre>
@@ -418,7 +432,7 @@ export function BuilderShell({
                   ) : (
                     <RotateCcw className="size-4" />
                   )}
-                  {busy ? "正在重试…" : "用原始需求重新生成"}
+                  {busy ? t.builder.retrying : t.builder.retryOriginal}
                 </Button>
 
                 <blockquote className="mt-4 rounded-lg border-l-2 border-line-strong bg-canvas-sunken px-4 py-3 text-sm leading-6 text-ink-soft">
@@ -431,7 +445,7 @@ export function BuilderShell({
             <div className="grid min-h-0 flex-1 md:grid-cols-[220px_minmax(0,1fr)]">
               <div className="scrollbar-thin overflow-auto border-b border-line bg-canvas-sunken p-2 md:border-b-0 md:border-r">
                 <p className="px-2 py-2 text-xs font-medium text-ink-faint">
-                  {showStream ? "本次改动" : "项目文件"}
+                  {showStream ? t.builder.changedThisTurn : t.builder.projectFiles}
                 </p>
                 {visibleFiles.map((file) => (
                   <button
@@ -453,10 +467,10 @@ export function BuilderShell({
               </div>
               <div className="grid min-h-0 grid-rows-[40px_minmax(0,1fr)]">
                 <div className="flex items-center border-b border-line px-4 font-mono text-[11px] text-ink-soft">
-                  {currentFile?.path ?? "还没有文件"}
+                  {currentFile?.path ?? t.builder.noFileYet}
                   {currentFile && (
                     <span className="ml-auto text-[10px] text-ink-faint">
-                      {currentFile.content.length} chars
+                      {t.builder.chars(currentFile.content.length)}
                     </span>
                   )}
                 </div>
@@ -469,7 +483,7 @@ export function BuilderShell({
                   />
                 ) : (
                   <p className="p-4 text-xs text-ink-faint">
-                    等待 Agent 开始写第一个文件…
+                    {t.builder.waitingForAgent}
                   </p>
                 )}
               </div>
@@ -482,11 +496,13 @@ export function BuilderShell({
                 {(
                   [
                     [
-                      "版本",
-                      hasVersion ? `v${versionNumber} runnable` : "无",
+                      t.builder.statVersion,
+                      hasVersion && versionNumber !== undefined
+                        ? t.builder.statVersionValue(versionNumber)
+                        : t.builder.statNoVersion,
                     ],
-                    ["文件", `${files.length} 个已保存`],
-                    ["生成器", provider ?? "unknown"],
+                    [t.builder.statFiles, t.builder.statFilesValue(files.length)],
+                    [t.builder.statProvider, provider ?? "unknown"],
                   ] as const
                 ).map(([label, value]) => (
                   <div
@@ -502,7 +518,7 @@ export function BuilderShell({
               {busy && (
                 <div className="mb-4 flex items-center gap-2 rounded-lg border border-line bg-canvas-sunken p-3 text-ink-soft">
                   <LoaderCircle className="size-4 animate-spin" />
-                  {stream.phaseLabel ?? "请求进行中"}
+                  {phaseLabel ?? t.builder.requestInFlight}
                   {stream.activePath && (
                     <span className="font-mono text-[11px] text-ink-faint">
                       {stream.activePath}
@@ -540,7 +556,7 @@ export function BuilderShell({
                   ))
                 ) : (
                   <p className="rounded-lg border border-line bg-canvas-sunken p-4 text-ink-faint">
-                    当前版本没有保存构建日志。
+                    {t.builder.noBuildLog}
                   </p>
                 )}
               </div>

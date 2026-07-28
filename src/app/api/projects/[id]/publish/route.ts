@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
+import { apiError } from "@/lib/api-error";
 import { createClient } from "@/lib/supabase/server";
 
 const paramsSchema = z.object({ id: z.uuid() });
@@ -24,11 +25,11 @@ export async function POST(
 ) {
   const params = paramsSchema.safeParse(await context.params);
   if (!params.success) {
-    return NextResponse.json({ error: "作品参数无效。" }, { status: 400 });
+    return apiError("invalid_project_id", 400);
   }
   const body = bodySchema.safeParse(await request.json().catch(() => ({})));
   if (!body.success) {
-    return NextResponse.json({ error: "请求参数无效。" }, { status: 400 });
+    return apiError("invalid_request", 400);
   }
 
   const supabase = await createClient();
@@ -36,7 +37,7 @@ export async function POST(
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) {
-    return NextResponse.json({ error: "请先登录。" }, { status: 401 });
+    return apiError("not_authenticated", 401);
   }
 
   const { data: project } = await supabase
@@ -50,10 +51,7 @@ export async function POST(
     !project.current_version_id ||
     project.status !== "ready"
   ) {
-    return NextResponse.json(
-      { error: "作品尚未生成可发布版本。" },
-      { status: 409 },
-    );
+    return apiError("no_publishable_version", 409);
   }
 
   const { data: version } = await supabase
@@ -62,7 +60,7 @@ export async function POST(
     .eq("id", project.current_version_id)
     .single();
   if (!version?.artifact_html) {
-    return NextResponse.json({ error: "预览产物不存在。" }, { status: 409 });
+    return apiError("artifact_missing", 409);
   }
 
   // Earlier snapshots stay active on purpose: a shared /play link must keep
@@ -81,7 +79,7 @@ export async function POST(
     .select("slug, visibility")
     .single();
   if (error || !published) {
-    return NextResponse.json({ error: "发布失败，请重试。" }, { status: 500 });
+    return apiError("publish_failed", 500);
   }
 
   return NextResponse.json(

@@ -3,11 +3,16 @@ import { redirect } from "next/navigation";
 
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
+import { intlLocale } from "@/lib/i18n/dictionary";
+import { getI18n } from "@/lib/i18n/server";
 import { createClient } from "@/lib/supabase/server";
 import { getServerEnv, isLiveGenerationReady } from "@/server/env";
 import type { Profile } from "@/types/database";
 
-export const metadata: Metadata = { title: "额度与用量" };
+export async function generateMetadata(): Promise<Metadata> {
+  const { t } = await getI18n();
+  return { title: t.metadata.usage };
+}
 
 interface UsageRow {
   id: string;
@@ -42,16 +47,21 @@ export default async function UsagePage() {
   const live = isLiveGenerationReady();
   const env = getServerEnv();
 
+  const { locale, t } = await getI18n();
+  const intl = intlLocale(locale);
+
   const stats = [
-    { label: "新建额度", value: profile?.create_credits ?? 0 },
-    { label: "修改额度", value: profile?.edit_credits ?? 0 },
-    { label: "已记录的生成", value: ledger.length },
+    { label: t.usage.createCredits, value: profile?.create_credits ?? 0 },
+    { label: t.usage.editCredits, value: profile?.edit_credits ?? 0 },
+    { label: t.usage.recordedRuns, value: ledger.length },
   ];
 
   return (
     <div className="mx-auto max-w-5xl px-5 py-12 lg:px-8">
       <div className="mb-10 border-b border-line pb-8">
-        <h1 className="font-serif text-3xl tracking-tight text-ink">额度与用量</h1>
+        <h1 className="font-serif text-3xl tracking-tight text-ink">
+          {t.usage.title}
+        </h1>
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <Badge variant={live ? "default" : "outline"}>
             {live ? "Live" : "Safe demo"}
@@ -61,9 +71,7 @@ export default async function UsagePage() {
           </span>
         </div>
         <p className="mt-3 max-w-2xl text-sm leading-6 text-ink-soft">
-          {live
-            ? "当前会真实调用模型并扣除额度。停下来向你提问的那一轮不计费。"
-            : "当前是零成本演示模式：生成走固定示例工程，不调用模型，也不扣额度。"}
+          {live ? t.usage.liveNote : t.usage.demoNote}
         </p>
       </div>
 
@@ -77,7 +85,7 @@ export default async function UsagePage() {
       </dl>
 
       <h2 className="mt-10 font-serif text-xl tracking-tight text-ink">
-        最近的生成
+        {t.usage.recentRuns}
       </h2>
       {ledger.length ? (
         <Card className="mt-4 divide-y divide-line">
@@ -87,22 +95,22 @@ export default async function UsagePage() {
               className="flex flex-wrap items-center gap-3 px-4 py-3 text-sm"
             >
               <Badge variant="outline">
-                {row.kind === "create" ? "新建" : "修改"}
+                {row.kind === "create" ? t.usage.kindCreate : t.usage.kindEdit}
               </Badge>
               <span className="font-mono text-xs text-ink-soft">{row.model}</span>
               <span className="font-mono text-xs text-ink-faint">
-                {row.input_tokens + row.output_tokens} tokens
+                {t.usage.tokens(row.input_tokens + row.output_tokens)}
               </span>
               <span className="ml-auto text-xs text-ink-faint">
-                {row.charged_credit ? "扣 1 次额度" : "未扣额度"} ·{" "}
-                {new Date(row.created_at).toLocaleString("zh-CN")}
+                {row.charged_credit ? t.usage.charged : t.usage.notCharged} ·{" "}
+                {new Date(row.created_at).toLocaleString(intl)}
               </span>
             </div>
           ))}
         </Card>
       ) : (
         <p className="mt-4 rounded-xl border border-dashed border-line-strong px-5 py-8 text-center text-sm text-ink-soft">
-          还没有计费记录。演示模式下的生成不会写入这里。
+          {t.usage.empty}
         </p>
       )}
     </div>

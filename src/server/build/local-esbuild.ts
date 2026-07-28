@@ -38,7 +38,7 @@ export async function buildWorkspaceLocally(workspace: GeneratedWorkspace) {
     const stylesheet =
       result.outputFiles.find((file) => file.path.endsWith(".css"))?.text ?? "";
     if (!javascript) {
-      throw new Error("本地构建没有生成 JavaScript 产物");
+      throw new Error("The local build produced no JavaScript output");
     }
 
     const shell = await readFile(path.join(buildRoot, "index.html"), "utf8");
@@ -60,7 +60,7 @@ export async function buildWorkspaceLocally(workspace: GeneratedWorkspace) {
         {
           level: "info" as const,
           message:
-            "本地安全构建完成：仅由平台调用 esbuild 解析和打包源码，未执行生成代码。",
+            "Local sandboxed build complete: the platform invoked esbuild to parse and bundle the source; no generated code was executed.",
         },
       ],
     };

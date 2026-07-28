@@ -5,6 +5,8 @@ import Link from "next/link";
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { useT } from "@/lib/i18n/client";
+import { translateError } from "@/lib/i18n/dictionary";
 import type { WorkVisibility } from "@/types/database";
 
 interface PublishPanelProps {
@@ -18,6 +20,7 @@ export function PublishPanel({
   publishedSlug: initialSlug,
   publishedVisibility,
 }: PublishPanelProps) {
+  const t = useT();
   const [slug, setSlug] = useState(initialSlug);
   const [visibility, setVisibility] = useState<WorkVisibility>(
     publishedVisibility ?? "public",
@@ -26,12 +29,12 @@ export function PublishPanel({
     (publishedVisibility ?? "public") === "public",
   );
   const [busy, setBusy] = useState<"publish" | "visibility" | null>(null);
-  const [error, setError] = useState<string>();
+  const [errorCode, setErrorCode] = useState<string>();
 
   async function publish() {
     if (busy) return;
     setBusy("publish");
-    setError(undefined);
+    setErrorCode(undefined);
 
     const response = await fetch(`/api/projects/${projectId}/publish`, {
       method: "POST",
@@ -43,10 +46,10 @@ export function PublishPanel({
     const result = (await response.json()) as {
       slug?: string;
       visibility?: WorkVisibility;
-      error?: string;
+      code?: string;
     };
     if (!response.ok || !result.slug) {
-      setError(result.error ?? "发布失败。");
+      setErrorCode(result.code ?? "publish_failed");
     } else {
       setSlug(result.slug);
       setVisibility(result.visibility ?? "public");
@@ -57,7 +60,7 @@ export function PublishPanel({
   async function updateVisibility(next: WorkVisibility) {
     if (busy) return;
     setBusy("visibility");
-    setError(undefined);
+    setErrorCode(undefined);
 
     const response = await fetch(`/api/projects/${projectId}/visibility`, {
       method: "PATCH",
@@ -66,10 +69,10 @@ export function PublishPanel({
     });
     const result = (await response.json()) as {
       visibility?: WorkVisibility;
-      error?: string;
+      code?: string;
     };
     if (!response.ok || !result.visibility) {
-      setError(result.error ?? "更新失败。");
+      setErrorCode(result.code ?? "visibility_update_failed");
     } else {
       setVisibility(result.visibility);
       setAllowRemix(result.visibility === "public");
@@ -87,7 +90,7 @@ export function PublishPanel({
             className="inline-flex h-10 items-center gap-2 rounded-lg border border-line-strong bg-surface px-3 text-sm text-ink hover:bg-canvas-sunken"
           >
             <ExternalLink className="size-4" />
-            公开页面
+            {t.publish.publicPage}
           </Link>
         )}
         <Button onClick={publish} disabled={busy !== null}>
@@ -96,7 +99,7 @@ export function PublishPanel({
           ) : (
             <Rocket className="size-4" />
           )}
-          {slug ? "发布当前版本" : "发布"}
+          {slug ? t.publish.publishCurrent : t.publish.publish}
         </Button>
       </div>
 
@@ -110,7 +113,7 @@ export function PublishPanel({
               updateVisibility(event.target.checked ? "public" : "private")
             }
           />
-          允许别人 Remix 成自己的作品
+          {t.publish.allowRemix}
         </label>
       ) : (
         <label className="flex items-center gap-2 text-xs text-ink-soft">
@@ -120,16 +123,16 @@ export function PublishPanel({
             disabled={busy !== null}
             onChange={(event) => setAllowRemix(event.target.checked)}
           />
-          允许别人 Remix 成自己的作品
+          {t.publish.allowRemix}
         </label>
       )}
 
       <p className="max-w-xs text-right text-xs text-ink-faint">
-        {slug
-          ? "发出去的链接永久有效；取消勾选后，之前发出去的也一起收回。"
-          : "不发布就没人看得到。"}
+        {slug ? t.publish.publishedNote : t.publish.unpublishedNote}
       </p>
-      {error && <p className="text-xs text-accent-hover">{error}</p>}
+      {errorCode && (
+        <p className="text-xs text-accent-hover">{translateError(t, errorCode)}</p>
+      )}
     </div>
   );
 }

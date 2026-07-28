@@ -1,5 +1,17 @@
 import type { GenerationEvent } from "@/lib/generation-events";
 
+/**
+ * A finished run, from the caller's point of view.
+ *
+ * The failure is a code rather than a sentence: it travels from a detached
+ * server run that has no idea who is reading, and gets turned into copy by the
+ * component that renders it.
+ */
+export interface GenerationOutcome {
+  ok: boolean;
+  errorCode?: string;
+}
+
 interface RunGenerationOptions {
   projectId: string;
   prompt: string;
@@ -22,7 +34,7 @@ export async function runGeneration({
   kind,
   onEvent,
   onConnectionChange,
-}: RunGenerationOptions): Promise<{ ok: boolean; error?: string }> {
+}: RunGenerationOptions): Promise<GenerationOutcome> {
   const response = await fetch(`/api/projects/${projectId}/generate`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -35,10 +47,10 @@ export async function runGeneration({
 
   const started = (await response.json().catch(() => ({}))) as {
     runId?: string;
-    error?: string;
+    code?: string;
   };
   if (!response.ok || !started.runId) {
-    return { ok: false, error: started.error ?? "生成失败，请稍后重试。" };
+    return { ok: false, errorCode: started.code ?? "generation_failed" };
   }
 
   return watchGeneration({
@@ -59,14 +71,14 @@ export function watchGeneration({
   runId: string;
   onEvent: (event: GenerationEvent) => void;
   onConnectionChange?: (connected: boolean) => void;
-}): Promise<{ ok: boolean; error?: string }> {
+}): Promise<GenerationOutcome> {
   return new Promise((resolve) => {
     const source = new EventSource(
       `/api/projects/${projectId}/generate/stream?runId=${encodeURIComponent(runId)}`,
     );
     let settled = false;
 
-    const finish = (outcome: { ok: boolean; error?: string }) => {
+    const finish = (outcome: GenerationOutcome) => {
       if (settled) return;
       settled = true;
       source.close();
@@ -84,7 +96,7 @@ export function watchGeneration({
       }
       onEvent(event);
       if (event.type === "done") finish({ ok: true });
-      if (event.type === "error") finish({ ok: false, error: event.message });
+      if (event.type === "error") finish({ ok: false, errorCode: event.code });
       // A question ends the run without building anything.
       if (event.type === "question") finish({ ok: false });
     };
@@ -95,7 +107,7 @@ export function watchGeneration({
       // been evicted, so the page reload below picks up the real state.
       onConnectionChange?.(false);
       if (source.readyState === EventSource.CLOSED) {
-        finish({ ok: false, error: "连接已断开，刷新页面查看最新结果。" });
+        finish({ ok: false, errorCode: "connection_lost" });
       }
     };
   });

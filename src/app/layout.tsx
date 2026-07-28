@@ -1,22 +1,29 @@
 import type { Metadata } from "next";
 
 import "@/app/globals.css";
+import { I18nProvider } from "@/lib/i18n/client";
+import { getI18n } from "@/lib/i18n/server";
 
-export const metadata: Metadata = {
-  title: {
-    default: "Dyna Studio — 一句话，做成一个能玩的东西",
-    template: "%s · Dyna Studio",
-  },
-  description:
-    "描述你的想法，Dyna Studio 生成真实的前端工程并完成构建，立刻打开来玩、接着改，然后分享链接。",
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const { t } = await getI18n();
+  return {
+    title: { default: t.metadata.title, template: "%s · Dyna Studio" },
+    description: t.metadata.description,
+  };
+}
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
+  const { locale } = await getI18n();
+
   return (
-    <html lang="zh-CN">
-      <body>{children}</body>
+    <html lang={locale}>
+      <body>
+        {/* Only the locale crosses the boundary; each client component looks
+            its own copy up from the bundle. */}
+        <I18nProvider locale={locale}>{children}</I18nProvider>
+      </body>
     </html>
   );
 }

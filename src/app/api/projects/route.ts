@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
+import { apiError } from "@/lib/api-error";
 import { createClient } from "@/lib/supabase/server";
 import { getGameGenerationProvider } from "@/server/llm";
 import { normalizeTitle } from "@/server/llm/title";
@@ -25,20 +26,17 @@ const createProjectSchema = z.object({
 async function nameProject(prompt: string) {
   try {
     const name = await getGameGenerationProvider().nameProject(prompt);
-    return normalizeTitle(name, "新作品");
+    return normalizeTitle(name);
   } catch (error) {
     console.error("[project_naming_failed]", error);
-    return normalizeTitle(prompt, "新作品");
+    return normalizeTitle(prompt);
   }
 }
 
 export async function POST(request: Request) {
   const parsed = createProjectSchema.safeParse(await request.json());
   if (!parsed.success) {
-    return NextResponse.json(
-      { error: "请用至少 8 个字描述你想做的游戏。" },
-      { status: 400 },
-    );
+    return apiError("prompt_too_short", 400);
   }
 
   const supabase = await createClient();
@@ -46,7 +44,7 @@ export async function POST(request: Request) {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) {
-    return NextResponse.json({ error: "请先登录。" }, { status: 401 });
+    return apiError("not_authenticated", 401);
   }
 
   const { data: project, error } = await supabase
@@ -61,13 +59,7 @@ export async function POST(request: Request) {
     .single();
 
   if (error || !project) {
-    return NextResponse.json(
-      {
-        error:
-          "项目创建失败。请确认 Supabase 迁移已执行，并检查服务配置。",
-      },
-      { status: 500 },
-    );
+    return apiError("project_create_failed", 500);
   }
 
   return NextResponse.json({ projectId: project.id }, { status: 201 });

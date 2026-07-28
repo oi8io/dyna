@@ -14,7 +14,7 @@ export function validateStandaloneHtml(html: string) {
   );
   const policy = content?.[1] ?? content?.[2];
   if (!policy) {
-    throw new Error("index.html 缺少 Content-Security-Policy");
+    throw new Error("index.html has no Content-Security-Policy");
   }
   const directives = new Map(
     policy
@@ -27,23 +27,23 @@ export function validateStandaloneHtml(html: string) {
   for (const directive of NONE_ONLY_DIRECTIVES) {
     const sources = directives.get(directive);
     if (sources?.length !== 1 || sources[0] !== "'none'") {
-      throw new Error(`index.html 缺少安全策略：${directive} 'none'`);
+      throw new Error(`index.html is missing the directive: ${directive} 'none'`);
     }
   }
   if (!directives.get("script-src")?.includes("'unsafe-inline'")) {
-    throw new Error("index.html 未声明受控的内联脚本策略");
+    throw new Error("index.html declares no controlled inline-script policy");
   }
   if (
     /<(?:script|img|audio|video|source|link)[^>]+(?:src|href)=["']https?:/i.test(
       html,
     )
   ) {
-    throw new Error("生成页面不能加载远程资源");
+    throw new Error("A generated page may not load remote resources");
   }
   if (/<script[^>]+src=/i.test(html)) {
-    throw new Error("预览产物必须是单文件，不能引用外部脚本");
+    throw new Error("The preview artifact must be a single file with no external scripts");
   }
   if (html.length > 500_000) {
-    throw new Error("预览产物超过大小限制");
+    throw new Error("The preview artifact exceeds the size limit");
   }
 }

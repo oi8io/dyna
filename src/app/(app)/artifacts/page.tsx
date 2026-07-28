@@ -6,11 +6,16 @@ import { redirect } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { intlLocale } from "@/lib/i18n/dictionary";
+import { getI18n } from "@/lib/i18n/server";
 import { createClient } from "@/lib/supabase/server";
 import { cn } from "@/lib/utils";
 import type { PublishedGame } from "@/types/database";
 
-export const metadata: Metadata = { title: "已发布" };
+export async function generateMetadata(): Promise<Metadata> {
+  const { t } = await getI18n();
+  return { title: t.metadata.published };
+}
 
 export default async function ArtifactsPage() {
   const supabase = await createClient();
@@ -37,13 +42,17 @@ export default async function ArtifactsPage() {
       | "published_at"
     >
   >;
+  const { locale, t } = await getI18n();
+  const intl = intlLocale(locale);
 
   return (
     <div className="mx-auto max-w-5xl px-5 py-12 lg:px-8">
       <div className="mb-10 border-b border-line pb-8">
-        <h1 className="font-serif text-3xl tracking-tight text-ink">已发布</h1>
+        <h1 className="font-serif text-3xl tracking-tight text-ink">
+          {t.artifacts.title}
+        </h1>
         <p className="mt-2 text-sm leading-6 text-ink-soft">
-          发出去的链接永久有效，之后怎么改都不会影响它。首页只展示每个作品最新的那一版。
+          {t.artifacts.subtitle}
         </p>
       </div>
 
@@ -60,12 +69,12 @@ export default async function ArtifactsPage() {
                 </div>
                 <div className="flex items-center gap-2">
                   {artifact.visibility === "public" ? (
-                    <Badge>可 Remix</Badge>
+                    <Badge>{t.common.remixable}</Badge>
                   ) : (
-                    <Badge variant="outline">仅试玩</Badge>
+                    <Badge variant="outline">{t.common.playOnly}</Badge>
                   )}
                   <span className="text-xs text-ink-faint">
-                    {new Date(artifact.published_at).toLocaleDateString("zh-CN")}
+                    {new Date(artifact.published_at).toLocaleDateString(intl)}
                   </span>
                 </div>
                 <div className="flex items-center gap-2">
@@ -75,14 +84,14 @@ export default async function ArtifactsPage() {
                       buttonVariants({ variant: "secondary", size: "sm" }),
                     )}
                   >
-                    编辑
+                    {t.artifacts.edit}
                   </Link>
                   <Link
                     href={`/play/${artifact.slug}`}
                     target="_blank"
                     className={cn(buttonVariants({ variant: "ghost", size: "sm" }))}
                   >
-                    打开
+                    {t.artifacts.open}
                     <ArrowUpRight className="size-3.5" />
                   </Link>
                 </div>
@@ -93,15 +102,17 @@ export default async function ArtifactsPage() {
       ) : (
         <div className="grid min-h-56 place-items-center rounded-xl border border-dashed border-line-strong p-8 text-center">
           <div>
-            <h2 className="font-serif text-lg text-ink">还没有发布过东西</h2>
+            <h2 className="font-serif text-lg text-ink">
+              {t.artifacts.emptyTitle}
+            </h2>
             <p className="mx-auto mt-2 max-w-sm text-sm leading-6 text-ink-soft">
-              作品在发布之前完全私有，不会出现在任何公共列表里。
+              {t.artifacts.emptyText}
             </p>
             <Link
               href="/builder"
               className={cn(buttonVariants({ size: "sm" }), "mt-5")}
             >
-              去我的作品
+              {t.artifacts.emptyAction}
             </Link>
           </div>
         </div>

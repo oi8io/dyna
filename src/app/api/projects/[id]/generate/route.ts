@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
+import { apiError } from "@/lib/api-error";
 import { createClient } from "@/lib/supabase/server";
 import { createDetachedClient } from "@/server/generation/client";
+import { generationErrorCode } from "@/server/generation/errors";
 import { startRun } from "@/server/generation/registry";
 import type { GenerationCheckpoint } from "@/server/generation/run";
 import { executeGeneration } from "@/server/generation/run";
@@ -32,7 +34,7 @@ export async function POST(
   const params = paramsSchema.safeParse(await context.params);
   const body = bodySchema.safeParse(await request.json());
   if (!params.success || !body.success) {
-    return NextResponse.json({ error: "请求参数无效。" }, { status: 400 });
+    return apiError("invalid_request", 400);
   }
 
   const supabase = await createClient();
@@ -43,7 +45,7 @@ export async function POST(
     data: { session },
   } = await supabase.auth.getSession();
   if (!user || !session) {
-    return NextResponse.json({ error: "请先登录。" }, { status: 401 });
+    return apiError("not_authenticated", 401);
   }
 
   const { data: project } = await supabase
@@ -52,7 +54,7 @@ export async function POST(
     .eq("id", params.data.id)
     .single();
   if (!project || project.user_id !== user.id) {
-    return NextResponse.json({ error: "项目不存在。" }, { status: 404 });
+    return apiError("project_not_found", 404);
   }
 
   // An earlier attempt that stopped part-way. Its plan and files are carried
@@ -106,9 +108,11 @@ export async function POST(
         /credit_exhausted|budget_exhausted|rate_limit|generation_disabled/.test(
           message,
         );
-      return NextResponse.json(
-        { error: known ? message : "无法开始生成，请稍后重试。" },
-        { status: known ? 429 : 500 },
+      // A known refusal is the user's to act on, so it keeps its own code; an
+      // unrecognised database failure is not, and is flattened to one.
+      return apiError(
+        known ? generationErrorCode(message) : "generation_start_failed",
+        known ? 429 : 500,
       );
     }
     jobId = job?.id;
@@ -136,7 +140,7 @@ export async function POST(
       p_plan: null,
       p_draft_files: null,
       p_artifact_html: null,
-      p_error: "已被新的尝试接管。",
+      p_error: "superseded_by_new_attempt",
     });
   }
 
@@ -155,7 +159,7 @@ export async function POST(
     emit,
   }).catch((error: unknown) => {
     console.error("[generation_crashed]", error);
-    emit({ type: "error", message: "生成失败，请稍后重试。" });
+    emit({ type: "error", code: "generation_failed" });
   });
 
   return NextResponse.json({ runId }, { status: 202 });

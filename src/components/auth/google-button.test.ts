@@ -48,9 +48,17 @@ describe("Sign in with Google button", () => {
     expect(source).toContain("gap-[10px]");
   });
 
-  it("says what the user is doing, rather than just 'Google'", () => {
-    // "Don't use the term Google by itself to represent the action."
-    expect(source).toContain("使用 Google 账号登录");
+  it("says what the user is doing, rather than just 'Google'", async () => {
+    // "Don't use the term Google by itself to represent the action." The label
+    // is translated, so the rule has to hold in every locale rather than in the
+    // one that happened to be written first.
+    const { MESSAGES } = await import("@/lib/i18n/messages");
+    const { LOCALES } = await import("@/lib/i18n/config");
+    for (const locale of LOCALES) {
+      const label = MESSAGES[locale].login.google;
+      expect(label).toContain("Google");
+      expect(label.replace("Google", "").trim().length).toBeGreaterThan(0);
+    }
   });
 
   it("keeps the logo's aspect ratio", () => {

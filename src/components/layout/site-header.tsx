@@ -1,6 +1,8 @@
 import Link from "next/link";
 
+import { LocaleSwitcher } from "@/components/layout/locale-switcher";
 import { buttonVariants } from "@/components/ui/button";
+import { getDictionary } from "@/lib/i18n/server";
 import { createClient } from "@/lib/supabase/server";
 import { cn } from "@/lib/utils";
 
@@ -9,6 +11,7 @@ export async function SiteHeader() {
   const {
     data: { user },
   } = await supabase.auth.getUser();
+  const t = await getDictionary();
 
   return (
     <header className="sticky top-0 z-50 border-b border-line bg-canvas/85 backdrop-blur">
@@ -23,29 +26,33 @@ export async function SiteHeader() {
             href="/#gallery"
             className={cn(buttonVariants({ variant: "ghost", size: "sm" }))}
           >
-            作品
+            {t.nav.gallery}
           </Link>
           <Link
             href="/#how"
             className={cn(buttonVariants({ variant: "ghost", size: "sm" }))}
           >
-            怎么用
+            {t.nav.how}
           </Link>
           {user ? (
             <Link
               href="/builder"
               className={cn(buttonVariants({ variant: "secondary", size: "sm" }))}
             >
-              进入工作台
+              {t.nav.workbench}
             </Link>
           ) : (
             <Link
               href="/login"
               className={cn(buttonVariants({ variant: "secondary", size: "sm" }))}
             >
-              登录
+              {t.nav.signIn}
             </Link>
           )}
+          {/* Last: it is settings, not navigation, and putting it ahead of the
+              links gave a control nobody touches twice the prominence of the
+              ones they came for. */}
+          <LocaleSwitcher className="ml-1" />
         </nav>
       </div>
     </header>

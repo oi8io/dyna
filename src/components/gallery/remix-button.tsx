@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { useT } from "@/lib/i18n/client";
+import { translateError } from "@/lib/i18n/dictionary";
 
 export function RemixButton({
   slug,
@@ -13,9 +15,10 @@ export function RemixButton({
   slug: string;
   signedIn: boolean;
 }) {
+  const t = useT();
   const router = useRouter();
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string>();
+  const [errorCode, setErrorCode] = useState<string>();
 
   async function remix() {
     if (busy) return;
@@ -24,17 +27,17 @@ export function RemixButton({
       return;
     }
     setBusy(true);
-    setError(undefined);
+    setErrorCode(undefined);
 
     const response = await fetch(`/api/works/${slug}/remix`, {
       method: "POST",
     });
     const result = (await response.json()) as {
       projectId?: string;
-      error?: string;
+      code?: string;
     };
     if (!response.ok || !result.projectId) {
-      setError(result.error ?? "Remix 失败。");
+      setErrorCode(result.code ?? "remix_failed");
       setBusy(false);
       return;
     }
@@ -50,9 +53,13 @@ export function RemixButton({
         ) : (
           <GitFork className="size-4" />
         )}
-        {busy ? "正在复制…" : "Remix 这个作品"}
+        {busy ? t.gallery.remixing : t.gallery.remix}
       </Button>
-      {error && <p className="text-xs text-accent-hover">{error}</p>}
+      {errorCode && (
+        <p className="text-xs text-accent-hover">
+          {translateError(t, errorCode)}
+        </p>
+      )}
     </div>
   );
 }

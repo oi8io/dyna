@@ -2,6 +2,8 @@ import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { detectContentLocale } from "@/lib/i18n/config";
+import type { ErrorCode } from "@/lib/i18n/dictionary";
 import type { GenerationEvent } from "@/lib/generation-events";
 import { buildGeneratedWorkspace } from "@/server/build";
 import {
@@ -10,8 +12,16 @@ import {
   isRepairableByAgent,
 } from "@/server/build/imports";
 import { getServerEnv } from "@/server/env";
+import {
+  generationErrorCode,
+  generationErrorDetail,
+} from "@/server/generation/errors";
 import { getGameGenerationProvider } from "@/server/llm";
-import { generationPlanSchema, planNeedsClarification } from "@/server/llm/plan";
+import {
+  FALLBACK_CHANGE_SUMMARY,
+  generationPlanSchema,
+  planNeedsClarification,
+} from "@/server/llm/plan";
 import {
   SPEC_PATH,
   appendChangelog,
@@ -25,7 +35,6 @@ import type { AgentFile, GeneratedWorkspace } from "@/server/workspace/schema";
 import {
   extractAgentFiles,
   mergeAgentFiles,
-  redactBuildLog,
   validateAgentFiles,
   validateWorkspace,
 } from "@/server/workspace/schema";
@@ -37,6 +46,15 @@ const PLAN_MAX_MS = 60_000;
 const TAIL_RESERVE_MS = 100_000;
 /** Below this, a repair pass cannot finish, so it is not started. */
 const REPAIR_MIN_MS = 70_000;
+
+/**
+ * Used only when the model returned no summary of its own, which is rare
+ * enough that it is not worth a round trip to ask again for one.
+ */
+const GENERIC_CHANGE_SUMMARY = {
+  "zh-CN": "更新了这个作品。",
+  en: "Updated this project.",
+} as const;
 
 export interface GenerationProject {
   id: string;
@@ -72,31 +90,6 @@ export interface ExecuteGenerationInput {
   /** Present when resuming a run that stopped part-way. */
   checkpoint?: GenerationCheckpoint;
   emit: (event: GenerationEvent) => void;
-}
-
-export function readableGenerationError(error: unknown) {
-  const message = error instanceof Error ? error.message : String(error);
-  if (message.includes("generation_disabled")) return "生成能力暂未开放。";
-  if (message.includes("global_budget_exhausted"))
-    return "今日公共生成预算已用完。";
-  if (message.includes("create_credit_exhausted"))
-    return "你的新建游戏额度已用完。";
-  if (message.includes("edit_credit_exhausted")) return "你的修改额度已用完。";
-  if (message.includes("rate_limit_exceeded"))
-    return "请求过于频繁，请一分钟后再试。";
-  if (message.includes("duplicate key")) return "已有生成任务正在进行。";
-  if (message.includes("snapshot_unreadable"))
-    return "上一个版本的源码快照损坏，无法在其基础上修改。";
-  if (message.includes("plan_timed_out"))
-    return "理解需求这一步超时了。稍后再试一次通常就好。";
-  if (/timed_out|aborted|AbortError|deadline/i.test(message))
-    return "这一步超时了，稍后重试。";
-  return "生成失败，请稍后重试。";
-}
-
-export function generationErrorDetail(error: unknown) {
-  const message = error instanceof Error ? error.message : String(error);
-  return redactBuildLog(message || "unknown_generation_error").slice(0, 800);
 }
 
 function labelStage(error: unknown, stage: string): unknown {
@@ -227,9 +220,9 @@ export async function executeGeneration({
     let plan;
     if (storedPlan?.success) {
       plan = storedPlan.data;
-      emit({ type: "phase", phase: "planning", message: "沿用上次的计划" });
+      emit({ type: "phase", phase: "planning", resumed: true });
     } else {
-      emit({ type: "phase", phase: "planning", message: "正在理解需求" });
+      emit({ type: "phase", phase: "planning" });
       ({ plan } = await provider
         .plan({
           ...input,
@@ -270,7 +263,13 @@ export async function executeGeneration({
     }
 
     if (!plan.changes.length) {
-      throw new Error("计划没有指出要改哪些文件。");
+      throw new Error("plan_named_no_files");
+    }
+
+    // The model writes in whatever language the request was in, so the one
+    // string it may have failed to produce has to match.
+    if (plan.changeSummary === FALLBACK_CHANGE_SUMMARY) {
+      plan.changeSummary = GENERIC_CHANGE_SUMMARY[detectContentLocale(prompt)];
     }
 
     emit({
@@ -296,14 +295,14 @@ export async function executeGeneration({
 
     if (resumedFiles.length) {
       changed = validateAgentFiles(resumedFiles) as AgentFile[];
-      emit({ type: "phase", phase: "writing", message: "沿用已写好的文件" });
+      emit({ type: "phase", phase: "writing", resumed: true });
       for (const file of changed) {
         emit({ type: "file-open", path: file.path });
         emit({ type: "file-delta", path: file.path, text: file.content });
         emit({ type: "file-close", path: file.path });
       }
     } else {
-      emit({ type: "phase", phase: "writing", message: "正在写代码" });
+      emit({ type: "phase", phase: "writing" });
       const written = await provider
         .write({
           ...input,
@@ -359,7 +358,7 @@ export async function executeGeneration({
     let workspace = assemble(changed);
     const prebuilt = provider.prebuiltArtifactHtml?.(input);
 
-    emit({ type: "phase", phase: "building", message: "正在打包" });
+    emit({ type: "phase", phase: "building" });
     let build;
     try {
       // Cross-file references are decidable from the file list, so they are
@@ -379,7 +378,7 @@ export async function executeGeneration({
         throw buildError;
       }
 
-      emit({ type: "phase", phase: "repairing", message: "出了点问题，正在修" });
+      emit({ type: "phase", phase: "repairing" });
       // Rewrites the whole set: a mismatched import is a disagreement between
       // two files, and fixing one end of it introduces the next failure.
       const fixed = await provider
@@ -402,7 +401,7 @@ export async function executeGeneration({
     }
 
     await checkpointAt("saving", { artifactHtml: build.artifactHtml });
-    emit({ type: "phase", phase: "saving", message: "正在保存" });
+    emit({ type: "phase", phase: "saving" });
     const { data: version, error: versionError } = await supabase
       .from("project_versions")
       .insert({
@@ -412,7 +411,7 @@ export async function executeGeneration({
         source_snapshot: workspace,
         artifact_html: build.artifactHtml,
         build_log: [
-          { level: "info", message: "生成完成，打包通过。" },
+          { level: "info", message: "Generation complete; bundle succeeded." },
           ...build.logs,
         ],
       })
@@ -454,8 +453,10 @@ export async function executeGeneration({
     emit({ type: "done", versionNumber, provider: providerName });
   } catch (error) {
     const errorDetail = generationErrorDetail(error);
+    const errorCode: ErrorCode = generationErrorCode(error);
     console.error("[generation_failed]", {
       projectId: project.id,
+      code: errorCode,
       error: errorDetail,
     });
     await Promise.all([
@@ -466,8 +467,11 @@ export async function executeGeneration({
       supabase.from("messages").insert({
         project_id: project.id,
         role: "assistant",
-        content: readableGenerationError(error),
-        metadata: { error: true, detail: errorDetail },
+        // The code is what the reader sees, translated on their side. `content`
+        // holds it too so a row is legible on its own — in the database, in a
+        // log, and in the rows written before this column existed.
+        content: errorCode,
+        metadata: { error: true, errorCode, detail: errorDetail },
       }),
     ]);
     // The stage is left where it stopped, so the next attempt resumes there
@@ -475,7 +479,7 @@ export async function executeGeneration({
     await checkpointAt(currentStage, { error: errorDetail }).catch(
       () => undefined,
     );
-    await settle("failed", 0, "generation_failed");
-    emit({ type: "error", message: readableGenerationError(error) });
+    await settle("failed", 0, errorCode);
+    emit({ type: "error", code: errorCode });
   }
 }

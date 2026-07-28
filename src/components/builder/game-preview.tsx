@@ -4,6 +4,7 @@ import { Maximize2, RefreshCw } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { useT } from "@/lib/i18n/client";
 
 type PreviewHealth =
   | { kind: "pending" }
@@ -27,6 +28,7 @@ export function GamePreview({
   /** Offered when the game failed to run, so the user has a way forward. */
   onRetry?: (instruction: string) => void;
 }) {
+  const t = useT();
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [revision, setRevision] = useState(0);
   const [health, setHealth] = useState<PreviewHealth>({ kind: "pending" });
@@ -42,7 +44,7 @@ export function GamePreview({
       if (!data || data.source !== "dyna-preview") return;
 
       if (data.kind === "error") {
-        setHealth({ kind: "error", message: data.message || "未知错误" });
+        setHealth({ kind: "error", message: data.message || t.preview.unknownError });
       } else if (data.kind === "empty") {
         // An error already reported is the more useful message; keep it.
         setHealth((current) =>
@@ -57,7 +59,8 @@ export function GamePreview({
 
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
-  }, []);
+    // `t` is a stable object per locale, so this re-subscribes only on switch.
+  }, [t]);
 
   function reload() {
     setHealth({ kind: "pending" });
@@ -73,13 +76,13 @@ export function GamePreview({
   return (
     <section className="flex min-h-0 flex-1 flex-col overflow-hidden">
       <div className="flex h-11 shrink-0 items-center justify-between border-b border-line px-3">
-        <div className="text-xs text-ink-soft">预览</div>
+        <div className="text-xs text-ink-soft">{t.preview.title}</div>
         <div className="flex gap-1">
           <Button
             variant="ghost"
             size="icon"
             onClick={reload}
-            aria-label="重新载入预览"
+            aria-label={t.preview.reload}
           >
             <RefreshCw className="size-4" />
           </Button>
@@ -87,7 +90,7 @@ export function GamePreview({
             variant="ghost"
             size="icon"
             onClick={fullscreen}
-            aria-label="全屏预览"
+            aria-label={t.preview.fullscreen}
           >
             <Maximize2 className="size-4" />
           </Button>
@@ -97,9 +100,7 @@ export function GamePreview({
       {broken && (
         <div className="shrink-0 border-b border-accent/25 bg-accent-soft px-3 py-2.5">
           <p className="text-sm leading-6 text-accent-hover">
-            {health.kind === "error"
-              ? "游戏跑起来出错了，画面可能是空的。"
-              : "画面是空的——代码跑通了，但什么都没画出来。"}
+            {health.kind === "error" ? t.preview.crashed : t.preview.blank}
           </p>
           {health.kind === "error" && (
             <pre className="scrollbar-thin mt-1.5 max-h-20 overflow-auto font-mono text-[11px] leading-5 text-accent-hover/80">
@@ -112,14 +113,16 @@ export function GamePreview({
               variant="secondary"
               className="mt-2"
               onClick={() =>
+                // Written in the interface language: it becomes the next turn
+                // in the conversation, and that is what the user is reading.
                 onRetry(
                   health.kind === "error"
-                    ? `画面没出来，控制台报错：${health.message}。请修好它。`
-                    : "画面是空的，什么都没渲染出来。请检查并修好。",
+                    ? t.preview.fixCrashPrompt(health.message)
+                    : t.preview.fixBlankPrompt,
                 )
               }
             >
-              让它修一下
+              {t.preview.fixIt}
             </Button>
           )}
         </div>
@@ -130,7 +133,7 @@ export function GamePreview({
       <iframe
         key={revision}
         ref={iframeRef}
-        title={`${title} 预览`}
+        title={t.preview.frameTitle(title)}
         srcDoc={artifactHtml}
         sandbox="allow-scripts"
         referrerPolicy="no-referrer"

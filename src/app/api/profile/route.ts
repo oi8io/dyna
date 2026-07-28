@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
+import { apiError } from "@/lib/api-error";
 import { createClient } from "@/lib/supabase/server";
 
 const bodySchema = z.object({
@@ -12,7 +13,7 @@ const bodySchema = z.object({
 export async function PATCH(request: Request) {
   const body = bodySchema.safeParse(await request.json());
   if (!body.success) {
-    return NextResponse.json({ error: "昵称最多 40 个字符。" }, { status: 400 });
+    return apiError("display_name_too_long", 400);
   }
 
   const supabase = await createClient();
@@ -20,7 +21,7 @@ export async function PATCH(request: Request) {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) {
-    return NextResponse.json({ error: "请先登录。" }, { status: 401 });
+    return apiError("not_authenticated", 401);
   }
 
   // `profiles_update_own` restricts this to the caller's own row; the explicit
@@ -33,7 +34,7 @@ export async function PATCH(request: Request) {
     .maybeSingle();
 
   if (error || !data) {
-    return NextResponse.json({ error: "保存失败，请重试。" }, { status: 500 });
+    return apiError("profile_save_failed", 500);
   }
 
   return NextResponse.json({ displayName: data.display_name });

@@ -2,6 +2,8 @@ import Link from "next/link";
 
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
+import { intlLocale } from "@/lib/i18n/dictionary";
+import { getI18n } from "@/lib/i18n/server";
 import { createClient } from "@/lib/supabase/server";
 import type { GalleryItem } from "@/types/database";
 
@@ -12,11 +14,16 @@ export async function GalleryGrid({ limit = 12 }: { limit?: number }) {
     p_offset: 0,
   });
   const items = (data ?? []) as GalleryItem[];
+  const { locale, t } = await getI18n();
+  // Titles and author names are user content and stay exactly as written. Only
+  // the chrome around them follows the reader's language, so a mixed-language
+  // gallery is the expected result rather than a bug.
+  const intl = intlLocale(locale);
 
   if (!items.length) {
     return (
       <p className="rounded-xl border border-dashed border-line-strong px-5 py-8 text-center text-sm text-ink-soft">
-        还没有人发布作品。做一个，然后点发布，它就会出现在这里。
+        {t.gallery.empty}
       </p>
     );
   }
@@ -35,12 +42,12 @@ export async function GalleryGrid({ limit = 12 }: { limit?: number }) {
             <div className="mt-8 flex items-center gap-2">
               {item.is_remix && <Badge variant="outline">Remix</Badge>}
               {item.visibility === "public" ? (
-                <Badge>可 Remix</Badge>
+                <Badge>{t.common.remixable}</Badge>
               ) : (
-                <Badge variant="outline">仅试玩</Badge>
+                <Badge variant="outline">{t.common.playOnly}</Badge>
               )}
               <span className="ml-auto text-xs text-ink-faint">
-                {new Date(item.published_at).toLocaleDateString("zh-CN")}
+                {new Date(item.published_at).toLocaleDateString(intl)}
               </span>
             </div>
           </Card>

@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { generationPlanSchema, planNeedsClarification } from "@/server/llm/plan";
+import {
+  FALLBACK_CHANGE_SUMMARY,
+  generationPlanSchema,
+  planNeedsClarification,
+} from "@/server/llm/plan";
 
 /**
  * The plan schema sits between a live model and the whole generation pipeline.
@@ -14,7 +18,9 @@ describe("generationPlanSchema tolerance", () => {
     expect(plan.assumptions).toEqual([]);
     expect(plan.questions).toEqual([]);
     expect(plan.spec).toBeUndefined();
-    expect(plan.changeSummary).toBe("更新了这个作品。");
+    // A sentinel, not copy: the run swaps it for a sentence in the language
+    // the request was written in before anyone reads it.
+    expect(plan.changeSummary).toBe(FALLBACK_CHANGE_SUMMARY);
   });
 
   it("keeps a spec when the model supplies a complete one", () => {

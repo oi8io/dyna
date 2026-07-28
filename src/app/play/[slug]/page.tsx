@@ -4,6 +4,8 @@ import { notFound } from "next/navigation";
 
 import { RemixButton } from "@/components/gallery/remix-button";
 import { Badge } from "@/components/ui/badge";
+import { intlLocale } from "@/lib/i18n/dictionary";
+import { getI18n } from "@/lib/i18n/server";
 import { createClient } from "@/lib/supabase/server";
 import type { PublishedGame } from "@/types/database";
 
@@ -34,7 +36,8 @@ export async function generateMetadata({
 }): Promise<Metadata> {
   const { slug } = await params;
   const work = await loadPublication(slug);
-  return { title: work?.title ?? "作品" };
+  const { t } = await getI18n();
+  return { title: work?.title ?? t.metadata.work };
 }
 
 export default async function PublishedWorkPage({
@@ -54,6 +57,8 @@ export default async function PublishedWorkPage({
   // Visibility now gates Remix only. Source is no longer browsable here; a
   // remixer gets it by forking, where it lands in a project of their own.
   const isRemixable = work.visibility === "public";
+  const { locale, t } = await getI18n();
+  const intl = intlLocale(locale);
 
   return (
     <main className="mx-auto flex min-h-screen max-w-5xl flex-col px-5 py-8 lg:px-8">
@@ -70,14 +75,16 @@ export default async function PublishedWorkPage({
           </h1>
           <div className="mt-2 flex flex-wrap items-center gap-2">
             <span className="text-xs text-ink-faint">
-              发布于 {new Date(work.published_at).toLocaleDateString("zh-CN")}
+              {t.play.publishedOn(
+                new Date(work.published_at).toLocaleDateString(intl),
+              )}
             </span>
             {isRemixable ? (
-              <Badge>可 Remix</Badge>
+              <Badge>{t.common.remixable}</Badge>
             ) : (
-              <Badge variant="outline">仅试玩</Badge>
+              <Badge variant="outline">{t.common.playOnly}</Badge>
             )}
-            {isOwner && <Badge variant="outline">你的作品</Badge>}
+            {isOwner && <Badge variant="outline">{t.play.yourWork}</Badge>}
           </div>
         </div>
 
@@ -86,7 +93,7 @@ export default async function PublishedWorkPage({
             href={`/builder/${work.project_id}`}
             className="inline-flex h-10 items-center rounded-lg border border-line-strong bg-surface px-4 text-sm text-ink hover:bg-canvas-sunken"
           >
-            继续编辑
+            {t.play.keepEditing}
           </Link>
         ) : (
           isRemixable && <RemixButton slug={slug} signedIn={Boolean(user)} />
@@ -97,7 +104,7 @@ export default async function PublishedWorkPage({
           room on a laptop and does not overflow on a phone. */}
       <div className="mt-6 overflow-hidden rounded-xl border border-line bg-surface">
         <iframe
-          title={`${work.title} 公开试玩`}
+          title={t.play.frameTitle(work.title)}
           srcDoc={work.artifact_html}
           sandbox="allow-scripts"
           referrerPolicy="no-referrer"
@@ -107,7 +114,7 @@ export default async function PublishedWorkPage({
 
       {!isRemixable && (
         <p className="mt-6 rounded-lg border border-line bg-canvas-sunken px-4 py-3 text-sm leading-6 text-ink-soft">
-          作者没有开放这个作品，所以它可以玩，但不能 Remix 成你自己的。
+          {t.play.notRemixable}
         </p>
       )}
     </main>

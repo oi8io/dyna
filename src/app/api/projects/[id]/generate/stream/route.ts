@@ -1,6 +1,6 @@
-import { NextResponse } from "next/server";
 import { z } from "zod";
 
+import { apiError } from "@/lib/api-error";
 import type { GenerationEvent } from "@/lib/generation-events";
 import { encodeSseFrame } from "@/lib/sse";
 import { createClient } from "@/lib/supabase/server";
@@ -26,7 +26,7 @@ export async function GET(
   const url = new URL(request.url);
   const runId = url.searchParams.get("runId") ?? "";
   if (!params.success || !runId) {
-    return NextResponse.json({ error: "请求参数无效。" }, { status: 400 });
+    return apiError("invalid_request", 400);
   }
 
   const supabase = await createClient();
@@ -34,7 +34,7 @@ export async function GET(
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) {
-    return NextResponse.json({ error: "请先登录。" }, { status: 401 });
+    return apiError("not_authenticated", 401);
   }
 
   const { data: project } = await supabase
@@ -43,17 +43,14 @@ export async function GET(
     .eq("id", params.data.id)
     .single();
   if (!project || project.user_id !== user.id) {
-    return NextResponse.json({ error: "项目不存在。" }, { status: 404 });
+    return apiError("project_not_found", 404);
   }
 
   const run = getRun(runId);
   if (!run) {
     // Either it finished long enough ago to be evicted, or the process
     // restarted. Either way the project row is the source of truth now.
-    return NextResponse.json(
-      { error: "这次生成已经结束，刷新页面查看结果。" },
-      { status: 410 },
-    );
+    return apiError("run_finished", 410);
   }
 
   // The browser sends this header when EventSource reconnects.

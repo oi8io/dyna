@@ -24,7 +24,12 @@ export interface ClarifyingQuestion {
 }
 
 export type GenerationEvent =
-  | { type: "phase"; phase: GenerationPhase; message: string }
+  /**
+   * `resumed` marks a stage inherited from an earlier attempt rather than
+   * performed now. The label itself lives in the client's dictionary: the run
+   * is detached from any request, so it cannot know the reader's language.
+   */
+  | { type: "phase"; phase: GenerationPhase; resumed?: boolean }
   | {
       type: "plan";
       understanding: string;
@@ -42,21 +47,14 @@ export type GenerationEvent =
   | { type: "file-open"; path: string }
   | { type: "file-delta"; path: string; text: string }
   | { type: "file-close"; path: string }
+  /** Build output. Already redacted, and English by design — it sits beside
+   *  compiler output that is English regardless of interface language. */
   | { type: "log"; level: "info" | "error"; message: string }
   | { type: "done"; versionNumber: number; provider: string }
-  | { type: "error"; message: string };
+  | { type: "error"; code: string };
 
 /** The subset a provider can emit while the model is still producing tokens. */
 export type StreamDelta = Extract<
   GenerationEvent,
   { type: "thinking" | "file-open" | "file-delta" | "file-close" }
 >;
-
-export const PHASE_LABELS: Record<GenerationPhase, string> = {
-  reserving: "正在确认额度",
-  planning: "正在理解需求",
-  writing: "正在写代码",
-  building: "正在打包",
-  repairing: "出了点问题，正在修",
-  saving: "正在保存",
-};

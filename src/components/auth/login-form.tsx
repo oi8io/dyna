@@ -7,10 +7,12 @@ import { FormEvent, useState } from "react";
 import { GoogleSignInButton } from "@/components/auth/google-button";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useT } from "@/lib/i18n/client";
 import { createClient } from "@/lib/supabase/client";
 import { toSafeInternalPath } from "@/lib/navigation";
 
 export function LoginForm() {
+  const t = useT();
   const params = useSearchParams();
   const [email, setEmail] = useState("");
   const [pending, setPending] = useState<"google" | "email" | null>(null);
@@ -48,9 +50,7 @@ export function LoginForm() {
       },
     });
     setPending(null);
-    setMessage(
-      error ? error.message : "登录链接已发送，请检查邮箱（也可能在垃圾邮件中）。",
-    );
+    setMessage(error ? error.message : t.login.linkSent);
   }
 
   return (
@@ -63,7 +63,7 @@ export function LoginForm() {
 
       <div className="flex items-center gap-3 text-xs text-ink-faint">
         <span className="h-px flex-1 bg-line" />
-        或使用邮箱
+        {t.login.orEmail}
         <span className="h-px flex-1 bg-line" />
       </div>
 
@@ -86,7 +86,7 @@ export function LoginForm() {
           ) : (
             <Mail className="size-4" />
           )}
-          发送登录链接
+          {t.login.sendLink}
         </Button>
       </form>
 

@@ -19,8 +19,8 @@ const spec = {
 describe("spec rendering", () => {
   it("includes intent but not derivable structure", () => {
     const markdown = renderSpecMarkdown(spec, []);
-    expect(markdown).toContain("## 目标体验");
-    expect(markdown).toContain("## 核心循环");
+    expect(markdown).toContain("## Target experience");
+    expect(markdown).toContain("## Core loop");
     expect(markdown).toContain("留出试错空间。");
     // A directory tree or tech stack written by hand goes stale and then
     // misleads the next turn, so it must not appear here.
@@ -33,7 +33,7 @@ describe("spec rendering", () => {
       { ...spec, constraints: [], decisions: [], openQuestions: [] },
       [],
     );
-    expect(markdown).toContain("- 暂无");
+    expect(markdown).toContain("- None yet");
   });
 
   it("round-trips the changelog across turns", () => {

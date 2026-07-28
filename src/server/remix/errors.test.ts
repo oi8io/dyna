@@ -8,7 +8,7 @@ describe("remixErrorResponse", () => {
       "new row violates ... source_is_private ...",
     );
     expect(result.status).toBe(403);
-    expect(result.error).toContain("源码");
+    expect(result.code).toBe("remix_source_private");
   });
 
   it("maps a missing runnable version to 409", () => {
@@ -28,7 +28,7 @@ describe("remixErrorResponse", () => {
       "permission denied for relation project_files at character 42, key=sb_secret_abc";
     const result = remixErrorResponse(raw);
     expect(result.status).toBe(500);
-    expect(result.error).not.toContain("sb_secret_abc");
-    expect(result.error).not.toContain("project_files");
+    // A code cannot carry a secret, which is the point of returning one.
+    expect(result.code).toBe("remix_failed");
   });
 });

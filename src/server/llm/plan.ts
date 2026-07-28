@@ -15,6 +15,15 @@ export const clarifyingQuestionSchema = z.object({
  * the whole generation with a generic "生成失败", and the user has no way to
  * see, let alone fix, a schema mismatch.
  */
+/**
+ * Stands in when the model returns no summary at all.
+ *
+ * A sentinel rather than a sentence: the schema is parsed with no idea who is
+ * reading or what language they wrote in, and the run replaces this with copy
+ * that matches the request before anyone sees it.
+ */
+export const FALLBACK_CHANGE_SUMMARY = "__no_change_summary__";
+
 export const generationPlanSchema = z.object({
   understanding: z.string().min(1).max(800),
   changes: z
@@ -31,7 +40,7 @@ export const generationPlanSchema = z.object({
   questions: z.array(clarifyingQuestionSchema).max(4).catch([]).default([]),
   /** Absent means "carry the previous spec forward unchanged". */
   spec: projectSpecSchema.optional().catch(undefined),
-  changeSummary: z.string().min(1).max(300).catch("更新了这个作品。"),
+  changeSummary: z.string().min(1).max(300).catch(FALLBACK_CHANGE_SUMMARY),
 });
 
 export type ClarifyingQuestion = z.infer<typeof clarifyingQuestionSchema>;

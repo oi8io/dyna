@@ -15,14 +15,14 @@ describe("standalone preview policy", () => {
     "<link href='https://evil.example/x.css'>",
   ])("rejects a remote resource: %s", (resource) => {
     expect(() => validateStandaloneHtml(`${safeHtml}${resource}`)).toThrow(
-      "远程资源",
+      "may not load remote resources",
     );
   });
 
   it("rejects a relative external script", () => {
     expect(() =>
       validateStandaloneHtml(`${safeHtml}<script src='src/game.js'></script>`),
-    ).toThrow("单文件");
+    ).toThrow("must be a single file");
   });
 
   it("rejects a misleading none directive that also allows network", () => {

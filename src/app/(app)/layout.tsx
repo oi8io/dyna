@@ -1,4 +1,5 @@
 import { AppShell } from "@/components/layout/app-shell";
+import { getDictionary } from "@/lib/i18n/server";
 import { createClient } from "@/lib/supabase/server";
 import { isLiveGenerationReady } from "@/server/env";
 import type { Profile, Project } from "@/types/database";
@@ -32,10 +33,11 @@ export default async function AppLayout({
   ]);
   const profile = profileData as Profile | null;
   const recent = (recentData ?? []) as Pick<Project, "id" | "title">[];
+  const t = await getDictionary();
 
   return (
     <AppShell
-      email={user.email ?? "未知账户"}
+      email={user.email ?? t.common.unknownAccount}
       displayName={profile?.display_name ?? null}
       createCredits={profile?.create_credits ?? 0}
       editCredits={profile?.edit_credits ?? 0}

@@ -77,3 +77,48 @@ describe("naming is separate from editing", () => {
     expect(name.length).toBeGreaterThan(0);
   });
 });
+
+/**
+ * English requests wrap the name in the same way Chinese ones do, just with
+ * more layers: "please make me a" is four separate openers, not one.
+ */
+describe("normalizeTitle in English", () => {
+  it("strips the verb and the article", () => {
+    expect(normalizeTitle("make a spider solitaire")).toBe("spider solitaire");
+    expect(normalizeTitle("build me a neon breakout")).toBe("neon breakout");
+    expect(normalizeTitle("please create an endless runner")).toBe(
+      "endless runner",
+    );
+    expect(normalizeTitle("I want to play a tower defense")).toBe(
+      "tower defense",
+    );
+  });
+
+  it("stops at the first clause here too", () => {
+    expect(normalizeTitle("make a spider solitaire, with drag and drop")).toBe(
+      "spider solitaire",
+    );
+  });
+
+  it("leaves a name that never had an opener alone", () => {
+    expect(normalizeTitle("Neon Breakout")).toBe("Neon Breakout");
+    // Without a word boundary, the opener pattern would eat these.
+    expect(normalizeTitle("Makeshift Empire")).toBe("Makeshift Empire");
+    expect(normalizeTitle("Anagram Rush")).toBe("Anagram Rush");
+  });
+
+  it("gives an English title room the Chinese cap would not", () => {
+    const long = "an endless roguelike deckbuilder with permanent upgrades";
+    const title = normalizeTitle(long);
+    expect(title.length).toBeGreaterThan(20);
+    expect(title.length).toBeLessThanOrEqual(40);
+    // Truncation lands on a word boundary rather than mid-word.
+    expect(long).toContain(title);
+    expect(title.endsWith(" ")).toBe(false);
+  });
+
+  it("falls back in the language the request was written in", () => {
+    expect(normalizeTitle("make a")).toBe("Untitled");
+    expect(normalizeTitle("做一个")).toBe("未命名作品");
+  });
+});

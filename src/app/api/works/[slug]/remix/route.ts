@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
+import { apiError } from "@/lib/api-error";
 import { createClient } from "@/lib/supabase/server";
 import { remixErrorResponse } from "@/server/remix/errors";
 
@@ -19,7 +20,7 @@ export async function POST(
 ) {
   const params = paramsSchema.safeParse(await context.params);
   if (!params.success) {
-    return NextResponse.json({ error: "作品链接无效。" }, { status: 400 });
+    return apiError("invalid_slug", 400);
   }
 
   const supabase = await createClient();
@@ -27,7 +28,7 @@ export async function POST(
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) {
-    return NextResponse.json({ error: "请先登录。" }, { status: 401 });
+    return apiError("not_authenticated", 401);
   }
 
   const { data: projectId, error } = await supabase.rpc("remix_publication", {
@@ -36,7 +37,7 @@ export async function POST(
 
   if (error || typeof projectId !== "string") {
     const mapped = remixErrorResponse(error?.message ?? "");
-    return NextResponse.json({ error: mapped.error }, { status: mapped.status });
+    return apiError(mapped.code, mapped.status);
   }
 
   return NextResponse.json({ projectId }, { status: 201 });

@@ -4,6 +4,7 @@ import { useState } from "react";
 
 import type { ClarifyingQuestion } from "@/lib/generation-events";
 import { Button } from "@/components/ui/button";
+import { useT } from "@/lib/i18n/client";
 
 interface ClarificationPanelProps {
   understanding: string;
@@ -21,6 +22,7 @@ export function ClarificationPanel({
   questions,
   onAnswer,
 }: ClarificationPanelProps) {
+  const t = useT();
   const [picked, setPicked] = useState<Record<number, string>>({});
   const answered = questions.every((_, index) => picked[index]);
 
@@ -34,9 +36,7 @@ export function ClarificationPanel({
   return (
     <div className="mr-6 space-y-3 rounded-lg border border-accent/25 bg-accent-soft p-3">
       <p className="text-sm leading-6 text-ink">{understanding}</p>
-      <p className="text-xs text-ink-soft">
-        有几处不确定，先问清楚再动手，这一轮不消耗额度。
-      </p>
+      <p className="text-xs text-ink-soft">{t.clarify.note}</p>
 
       {questions.map((item, index) => (
         <div key={item.question} className="space-y-1.5">
@@ -63,7 +63,7 @@ export function ClarificationPanel({
       ))}
 
       <Button size="sm" className="w-full" disabled={!answered} onClick={submit}>
-        按这些回答继续
+        {t.clarify.submit}
       </Button>
     </div>
   );

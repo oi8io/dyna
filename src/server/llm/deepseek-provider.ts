@@ -433,7 +433,7 @@ export class DeepSeekGameProvider implements GameGenerationProvider {
     );
     if (!parsed.success) {
       throw new Error(
-        `模型返回的结构无法解析：${parsed.error.issues[0]?.message ?? "unknown"}`,
+        `The model returned an unparseable structure: ${parsed.error.issues[0]?.message ?? "unknown"}`,
       );
     }
 
@@ -454,7 +454,7 @@ export class DeepSeekGameProvider implements GameGenerationProvider {
     ) as AgentFile[];
 
     if (!files.length) {
-      throw new Error("模型没有返回计划里的任何文件");
+      throw new Error("The model returned none of the files in the plan");
     }
 
     return {
