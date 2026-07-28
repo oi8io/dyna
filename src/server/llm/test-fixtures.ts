@@ -15,7 +15,12 @@ export function planFixture(overrides: Partial<GenerationPlan> = {}) {
     questions: [],
     spec: {
       goal: "轻量、几秒上手的网页小游戏。",
-      coreLoop: "移动挡板接球，击碎全部砖块。",
+      coreLoop: "每 1-2 秒球往返一次，移动挡板接住它并清空砖墙。",
+      controls: ["← / →：移动挡板", "空格：开球"],
+      genreConventions: ["挡板接触点决定反弹角度"],
+      difficulty: ["初始球速 4，每清 10 块提速 8%，上限 12"],
+      feedback: ["球撞挡板时挡板闪白 80ms"],
+      winLose: ["胜：清空全部砖块", "负：三条命耗尽"],
       constraints: [],
       decisions: [],
       openQuestions: [],

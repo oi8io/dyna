@@ -155,10 +155,19 @@ async function callDeepSeek(
   },
 ) {
   const env = getServerEnv();
-  const budget = Math.min(
-    env.DEEPSEEK_TIMEOUT_MS,
-    options.timeoutMs ?? env.DEEPSEEK_TIMEOUT_MS,
-  );
+  /**
+   * The caller's budget wins outright; the env var is the default for callers
+   * that do not track one.
+   *
+   * It used to be a `Math.min` of the two, which quietly made
+   * `DEEPSEEK_TIMEOUT_MS` a ceiling over every caller — so raising the design
+   * step's allowance to three minutes did nothing at all while that variable
+   * sat at two. The run already bounds itself against
+   * `GENERATION_DEADLINE_MS`, and the idle timer below is what actually catches
+   * a hung connection, so a second ceiling here bought nothing and hid the
+   * setting that was supposed to matter.
+   */
+  const budget = options.timeoutMs ?? env.DEEPSEEK_TIMEOUT_MS;
   if (budget <= 0) throw new Error("generation_deadline_exceeded");
 
   const controller = new AbortController();
@@ -353,15 +362,32 @@ export class DeepSeekGameProvider implements GameGenerationProvider {
           content: `${contextBlock(input, { includeSource: false })}\n\nUser request (${input.kind}):\n${input.prompt}`,
         },
       ],
-      // Comprehension plus a short JSON. Chain-of-thought buys nothing here and
-      // costs the warm-up that was timing this stage out, and disabling it also
-      // makes `temperature` take effect again.
-      {
-        temperature: 0.1,
-        model: env.DEEPSEEK_PLAN_MODEL,
-        thinking: false,
-        timeoutMs: input.timeoutMs,
-      },
+      // Two different jobs behind one method.
+      //
+      // An EDIT is comprehension plus a short JSON: work out which files have
+      // to differ and say so. Chain-of-thought buys nothing there, costs the
+      // warm-up that was timing this stage out, and disabling it also makes
+      // `temperature` take effect again.
+      //
+      // A CREATE designs the game. Its spec is the only thing that survives the
+      // run — every later turn reads it and nothing else remembers why the game
+      // is the way it is — so it gets the stronger model, reasoning, and enough
+      // temperature to make a choice rather than average over the obvious ones.
+      // It was previously done by the small model with reasoning off at 0.1,
+      // which is tuned to do the opposite of design, and it showed.
+      input.kind === "create"
+        ? {
+            temperature: 0.8,
+            model: env.DEEPSEEK_MODEL,
+            thinking: true,
+            timeoutMs: input.timeoutMs,
+          }
+        : {
+            temperature: 0.1,
+            model: env.DEEPSEEK_PLAN_MODEL,
+            thinking: false,
+            timeoutMs: input.timeoutMs,
+          },
     );
 
     const plan = generationPlanSchema.parse(

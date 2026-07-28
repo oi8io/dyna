@@ -41,7 +41,14 @@ import {
 
 /** How much conversation to replay. Enough for context, bounded for cost. */
 const HISTORY_TURNS = 12;
+/** An edit's plan is comprehension and a short JSON; it does not need long. */
 const PLAN_MAX_MS = 60_000;
+/**
+ * A create designs the game, with reasoning on and the stronger model, so it
+ * needs room. Timing out here is worse than waiting: the run fails before it
+ * has produced anything, and the retry pays for the same thinking again.
+ */
+const DESIGN_MAX_MS = 180_000;
 /** Left for the build and for persisting, after the last model call. */
 const TAIL_RESERVE_MS = 100_000;
 /** Below this, a repair pass cannot finish, so it is not started. */
@@ -226,7 +233,10 @@ export async function executeGeneration({
       ({ plan } = await provider
         .plan({
           ...input,
-          timeoutMs: Math.min(PLAN_MAX_MS, remainingMs() - TAIL_RESERVE_MS),
+          timeoutMs: Math.min(
+            kind === "create" ? DESIGN_MAX_MS : PLAN_MAX_MS,
+            remainingMs() - TAIL_RESERVE_MS,
+          ),
         })
         .catch((error: unknown) => {
           throw labelStage(error, "plan");
