@@ -11,13 +11,22 @@ import type { PublishedGame } from "@/types/database";
 
 async function loadPublication(slug: string) {
   const supabase = await createClient();
-  const { data } = await supabase
-    .from("published_games")
-    .select("id, owner_id, project_id, title, artifact_html, visibility, published_at")
-    .eq("slug", slug)
-    .eq("is_active", true)
-    .maybeSingle();
-  return data as Pick<
+  // The title is read separately, through a function, because it comes from the
+  // project rather than the frozen snapshot — see the migration for why — and
+  // `projects` is not readable here: the same row holds `original_prompt`.
+  const [{ data }, { data: liveTitle }] = await Promise.all([
+    supabase
+      .from("published_games")
+      .select(
+        "id, owner_id, project_id, title, artifact_html, visibility, published_at",
+      )
+      .eq("slug", slug)
+      .eq("is_active", true)
+      .maybeSingle(),
+    supabase.rpc("get_publication_title", { p_slug: slug }),
+  ]);
+  if (!data) return null;
+  const publication = data as Pick<
     PublishedGame,
     | "id"
     | "owner_id"
@@ -26,7 +35,12 @@ async function loadPublication(slug: string) {
     | "artifact_html"
     | "visibility"
     | "published_at"
-  > | null;
+  >;
+  return {
+    ...publication,
+    title:
+      typeof liveTitle === "string" && liveTitle ? liveTitle : publication.title,
+  };
 }
 
 export async function generateMetadata({
