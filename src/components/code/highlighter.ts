@@ -43,11 +43,26 @@ export function langForPath(path: string): SupportedLang {
   return "text";
 }
 
-function escapeHtml(value: string) {
+/**
+ * Every line rendered by the code view goes through `dangerouslySetInnerHTML`,
+ * so anything that has not been through shiki has to be escaped here first.
+ *
+ * This is not only about display. A file whose text contains `</script>` — and
+ * the project template's own `index.html` does — used to close the inline
+ * script carrying the RSC payload, which spilled the rest of the page into the
+ * document as markup and stopped React from ever hydrating the builder. The
+ * page rendered, and nothing on it worked.
+ */
+export function escapeHtml(value: string) {
   return value
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;");
+}
+
+/** The unhighlighted view of a file: escaped, one entry per line. */
+export function escapeLines(code: string) {
+  return code.split("\n").map(escapeHtml);
 }
 
 /**
@@ -58,8 +73,7 @@ export async function highlightLines(
   code: string,
   lang: SupportedLang,
 ): Promise<string[]> {
-  const lines = code.split("\n");
-  if (lang === "text") return lines.map(escapeHtml);
+  if (lang === "text") return escapeLines(code);
 
   try {
     const highlighter = await loadHighlighter();
@@ -71,6 +85,6 @@ export async function highlightLines(
     return html.split("\n");
   } catch {
     // A grammar failure must never blank out the editor.
-    return lines.map(escapeHtml);
+    return escapeLines(code);
   }
 }

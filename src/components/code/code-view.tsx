@@ -2,7 +2,11 @@
 
 import { useEffect, useRef, useState } from "react";
 
-import { highlightLines, langForPath } from "@/components/code/highlighter";
+import {
+  escapeLines,
+  highlightLines,
+  langForPath,
+} from "@/components/code/highlighter";
 
 interface CodeViewProps {
   path: string;
@@ -23,7 +27,11 @@ export function CodeView({
   streaming = false,
   className = "",
 }: CodeViewProps) {
-  const [lines, setLines] = useState<string[]>(() => code.split("\n"));
+  // Escaped from the very first render, including on the server. Splitting the
+  // raw file put unescaped `</script>` and `<!-- ... -->` from the project's own
+  // `index.html` straight into the document, which truncated the inline RSC
+  // payload and left the builder unhydrated — every button on the page dead.
+  const [lines, setLines] = useState<string[]>(() => escapeLines(code));
   const scrollerRef = useRef<HTMLDivElement>(null);
   const pendingRef = useRef<number>(0);
 
