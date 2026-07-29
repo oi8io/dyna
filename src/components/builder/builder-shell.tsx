@@ -39,6 +39,8 @@ interface BuilderShellProps {
   buildLog?: Json;
   publishedSlug?: string;
   publishedVisibility?: WorkVisibility;
+  /** The version the newest publication froze, so the button can tell if it is stale. */
+  publishedVersionId?: string;
   /** `error_code` from the most recent failed job, when there is one. */
   lastErrorCode?: string;
   /**
@@ -108,6 +110,7 @@ export function BuilderShell({
   buildLog,
   publishedSlug,
   publishedVisibility,
+  publishedVersionId,
   lastErrorCode,
   autoStart = false,
   activeRunId,
@@ -132,6 +135,11 @@ export function BuilderShell({
   const { state: stream, start, resume } = useGenerationStream();
   const busy = stream.busy;
   const errorCode = stream.errorCode;
+  // The stream ended without the page seeing the result — the run outlived the
+  // connection, or the connection died mid-run. Both are answered by reloading,
+  // and neither is an error worth a banner.
+  const isDetached =
+    errorCode === "run_finished" || errorCode === "connection_lost";
   // A resumed stage says so; otherwise the plain label for the phase.
   const phaseLabel = stream.phase
     ? ((stream.phaseResumed ? t.resumedPhases[stream.phase] : undefined) ??
@@ -257,7 +265,7 @@ export function BuilderShell({
   // page scrolling is restored.
   return (
     <div className="mx-auto flex max-w-[1600px] flex-col gap-4 px-4 py-5 lg:h-full lg:px-6">
-      <div className="flex flex-wrap items-center justify-between gap-3 lg:shrink-0">
+      <div className="lg:shrink-0">
         <div>
           <div className="mb-1.5 flex flex-wrap items-center gap-2">
             <h1 className="max-w-2xl truncate font-serif text-xl tracking-tight text-ink">
@@ -279,16 +287,13 @@ export function BuilderShell({
           </div>
           <p className="text-xs text-ink-faint">{t.builder.safetyNote}</p>
         </div>
-        {hasVersion && (
-          <PublishPanel
-            projectId={project.id}
-            publishedSlug={publishedSlug}
-            publishedVisibility={publishedVisibility}
-          />
-        )}
       </div>
 
-      {errorCode && (
+      {/* A detached stream is not a failure: the run is on the server and the
+          page just stopped watching it. Saying so in a banner across the top of
+          the builder read like something had broken, so it goes in the
+          conversation with the turn it belongs to. */}
+      {errorCode && !isDetached && (
         <p className="rounded-lg border border-accent/25 bg-accent-soft px-4 py-3 text-sm text-accent-hover lg:shrink-0">
           {translateError(t, errorCode)}
         </p>
@@ -366,6 +371,19 @@ export function BuilderShell({
                 )}
               </div>
             )}
+
+            {isDetached && errorCode && (
+              <div className="mr-6 flex flex-wrap items-center gap-2 rounded-lg rounded-bl-sm border border-line bg-canvas-sunken p-3 text-sm leading-6 text-ink-soft">
+                <span>{translateError(t, errorCode)}</span>
+                <button
+                  type="button"
+                  onClick={() => window.location.reload()}
+                  className="rounded-md border border-line-strong bg-surface px-2 py-0.5 text-xs text-ink transition-colors hover:bg-canvas-sunken"
+                >
+                  {t.builder.reloadPage}
+                </button>
+              </div>
+            )}
           </div>
           <form onSubmit={edit} className="shrink-0 border-t border-line p-3">
             <Textarea
@@ -417,12 +435,25 @@ export function BuilderShell({
                 )}
               </button>
             ))}
-            {busy && (
-              <span className="ml-auto flex items-center gap-2 pr-2 text-xs text-ink-soft">
-                <LoaderCircle className="size-3.5 animate-spin" />
-                {phaseLabel ?? t.builder.generating}
-              </span>
-            )}
+            {/* Publishing belongs to the thing being looked at, so it sits at
+                the end of this bar rather than in the page header. */}
+            <div className="ml-auto flex items-center gap-2 pr-1">
+              {busy && (
+                <span className="flex items-center gap-2 text-xs text-ink-soft">
+                  <LoaderCircle className="size-3.5 animate-spin" />
+                  {phaseLabel ?? t.builder.generating}
+                </span>
+              )}
+              {hasVersion && (
+                <PublishPanel
+                  projectId={project.id}
+                  currentVersionId={project.current_version_id ?? undefined}
+                  publishedSlug={publishedSlug}
+                  publishedVisibility={publishedVisibility}
+                  publishedVersionId={publishedVersionId}
+                />
+              )}
+            </div>
           </div>
 
           {workspaceTab === "preview" &&

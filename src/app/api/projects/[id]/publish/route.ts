@@ -76,14 +76,20 @@ export async function POST(
       artifact_html: version.artifact_html,
       visibility: body.data.visibility,
     })
-    .select("slug, visibility")
+    .select("slug, visibility, version_id")
     .single();
   if (error || !published) {
     return apiError("publish_failed", 500);
   }
 
+  // `versionId` lets the panel tell "published" from "published, then edited"
+  // without a reload, which is what decides whether the button is live.
   return NextResponse.json(
-    { slug: published.slug, visibility: published.visibility },
+    {
+      slug: published.slug,
+      visibility: published.visibility,
+      versionId: published.version_id,
+    },
     { status: 201 },
   );
 }

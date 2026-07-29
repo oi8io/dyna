@@ -62,7 +62,7 @@ export default async function BuilderProjectPage({
       .order("created_at"),
     supabase
       .from("published_games")
-      .select("slug, visibility")
+      .select("slug, visibility, version_id")
       .eq("project_id", project.id)
       .eq("is_active", true)
       .order("published_at", { ascending: false })
@@ -115,6 +115,7 @@ export default async function BuilderProjectPage({
       buildLog={version?.build_log}
       publishedSlug={publishedData?.slug}
       publishedVisibility={publishedData?.visibility}
+      publishedVersionId={publishedData?.version_id ?? undefined}
       lastErrorCode={failedJob?.error_code ?? undefined}
       activeRunId={activeJob?.id ?? undefined}
     />

@@ -132,6 +132,7 @@ export const en: Dictionary = {
       "A link you've shared works forever, no matter what you change afterwards. The home page only shows the newest version of each project.",
     edit: "Edit",
     open: "Open",
+    earlierLink: "Earlier link",
     emptyTitle: "Nothing published yet",
     emptyText:
       "Projects are entirely private until you publish them. They appear in no public listing.",
@@ -183,6 +184,13 @@ export const en: Dictionary = {
     publicPage: "Public page",
     publish: "Publish",
     publishCurrent: "Publish current version",
+    publishing: "Publishing…",
+    upToDate: "Up to date",
+    upToDateHint:
+      "This version is already published. Change something and you can publish again.",
+    publishedJustNow: "Published",
+    /** The switch's own label; the full sentence is its tooltip. */
+    remix: "Remix",
     allowRemix: "Let others remix this into their own project",
     publishedNote:
       "A shared link works forever. Unchecking this also revokes remix rights on links you already shared.",
@@ -222,6 +230,7 @@ export const en: Dictionary = {
     tabCode: "Code",
     tabConsole: "Console",
     generating: "Generating",
+    reloadPage: "Reload",
     noVersionTitle: "This project has no runnable version",
     noVersionAfterFailure:
       "The last run did not finish. Your original request and the conversation are both kept, so you can retry once it's sorted — the failed attempt is not charged twice.",
@@ -291,9 +300,10 @@ export const en: Dictionary = {
     remix_rate_limited: "Too many remixes. Please try again shortly.",
     remix_failed: "Remix failed. Please try again.",
 
-    run_finished: "This run has already ended. Reload the page to see the result.",
-    connection_lost:
-      "The connection dropped. Reload the page to see the latest result.",
+    // Shown inside the conversation next to a reload button, so neither of
+    // these has to say "reload the page" itself.
+    run_finished: "This run has already finished.",
+    connection_lost: "The connection dropped. The result is on the server.",
 
     generation_start_failed: "Could not start generation. Please try again shortly.",
     generation_failed: "Generation failed. Please try again shortly.",

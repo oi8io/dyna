@@ -132,6 +132,7 @@ export const zhCN = {
       "发出去的链接永久有效，之后怎么改都不会影响它。首页只展示每个作品最新的那一版。",
     edit: "编辑",
     open: "打开",
+    earlierLink: "早前的链接",
     emptyTitle: "还没有发布过东西",
     emptyText: "作品在发布之前完全私有，不会出现在任何公共列表里。",
     emptyAction: "去我的作品",
@@ -180,6 +181,12 @@ export const zhCN = {
     publicPage: "公开页面",
     publish: "发布",
     publishCurrent: "发布当前版本",
+    publishing: "发布中…",
+    upToDate: "已是最新",
+    upToDateHint: "当前版本已经发布过了。改点什么，就能再发一版。",
+    publishedJustNow: "已发布",
+    /** The switch's own label; the full sentence is its tooltip. */
+    remix: "Remix",
     allowRemix: "允许别人 Remix 成自己的作品",
     publishedNote: "发出去的链接永久有效；取消勾选后，之前发出去的也一起收回。",
     unpublishedNote: "不发布就没人看得到。",
@@ -219,6 +226,7 @@ export const zhCN = {
     tabCode: "代码",
     tabConsole: "运行信息",
     generating: "正在生成",
+    reloadPage: "刷新查看",
     noVersionTitle: "这个作品还没有可运行的版本",
     noVersionAfterFailure:
       "上一次生成没有完成。原始需求和对话都保留着，修好之后可以直接重试，失败的那次不会重复扣额度。",
@@ -291,8 +299,10 @@ export const zhCN = {
     remix_rate_limited: "Remix 太频繁了，请稍后再试。",
     remix_failed: "Remix 失败，请稍后重试。",
 
-    run_finished: "这次生成已经结束，刷新页面查看结果。",
-    connection_lost: "连接已断开，刷新页面查看最新结果。",
+    // Shown inside the conversation next to a reload button, so neither of
+    // these has to say "reload the page" itself.
+    run_finished: "这次生成已经跑完了。",
+    connection_lost: "连接断开了，结果还在服务端。",
 
     generation_start_failed: "无法开始生成，请稍后重试。",
     generation_failed: "生成失败，请稍后重试。",
