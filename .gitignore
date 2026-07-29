@@ -42,3 +42,4 @@ docs/
 # Logs and operating-system files
 *.log
 .DS_Store
+ship.sh
