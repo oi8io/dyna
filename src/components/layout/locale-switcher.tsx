@@ -38,12 +38,19 @@ function persistLocale(locale: Locale) {
  */
 export function LocaleSwitcher({
   className,
-  /** The sidebar sits at the bottom of the viewport, so it opens upward. */
+  /**
+   * Where the list goes relative to the button.
+   *
+   * `top` for anything sitting at the bottom of the viewport, and `right` for
+   * the collapsed sidebar: a 56px rail has nothing to its left, so a list
+   * anchored to the button's right edge ran straight off the screen. Opening
+   * sideways puts it over the main pane, which is the only room there is.
+   */
   side = "bottom",
   align = "end",
 }: {
   className?: string;
-  side?: "top" | "bottom";
+  side?: "top" | "bottom" | "right";
   align?: "start" | "end";
 }) {
   const { locale } = useLocale();
@@ -101,8 +108,11 @@ export function LocaleSwitcher({
           aria-label={t.common.language}
           className={cn(
             "absolute z-50 min-w-40 rounded-lg border border-line bg-surface p-1 shadow-lg",
-            side === "top" ? "bottom-full mb-1.5" : "top-full mt-1.5",
-            align === "end" ? "right-0" : "left-0",
+            side === "right" && "bottom-0 left-full ml-1.5",
+            side === "top" && "bottom-full mb-1.5",
+            side === "bottom" && "top-full mt-1.5",
+            // A sideways list is already anchored on both axes.
+            side !== "right" && (align === "end" ? "right-0" : "left-0"),
           )}
         >
           {LOCALES.map((option) => (

@@ -162,9 +162,13 @@ export function AppShell({ recent, children, ...user }: AppShellProps) {
               </>
             )}
           </button>
-          {/* Last here too, matching the header. `align="end"` keeps the list
-              inside the sidebar now that it hangs off the right edge. */}
-          <LocaleSwitcher side="top" align="end" />
+          {/* Expanded, the list hangs off the button's right edge and stays
+              inside the sidebar. Collapsed, there is no room to its left — the
+              rail is 56px wide — so it opens sideways over the main pane. */}
+          <LocaleSwitcher
+            side={collapsed ? "right" : "top"}
+            align="end"
+          />
         </div>
 
         <div className="shrink-0">

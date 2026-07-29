@@ -125,7 +125,17 @@ export function UserCard({
   return (
     <div ref={containerRef} className="relative border-t border-line p-2">
       {open && (
-        <div className="absolute bottom-full left-2 z-50 mb-2 w-64 rounded-xl border border-line bg-surface p-3 shadow-lg">
+        <div
+          className={cn(
+            "absolute z-50 w-64 rounded-xl border border-line bg-surface p-3 shadow-lg",
+            // Same reasoning as the language menu: a 56px rail cannot hold a
+            // 256px panel, so on the rail it flies out sideways instead of
+            // straddling the edge.
+            collapsed
+              ? "bottom-2 left-full ml-1.5"
+              : "bottom-full left-2 mb-2",
+          )}
+        >
           <p className="truncate text-xs text-ink-faint">{email}</p>
 
           <p className="mt-3 text-xs text-ink-soft" id="display-name-label">
