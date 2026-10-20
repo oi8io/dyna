@@ -20,7 +20,7 @@ import { getGameGenerationProvider } from "@/server/llm";
 import {
   FALLBACK_CHANGE_SUMMARY,
   generationPlanSchema,
-  planNeedsClarification,
+  planIntent,
 } from "@/server/llm/plan";
 import {
   SPEC_PATH,
@@ -196,13 +196,20 @@ export async function executeGeneration({
 
     const { data: historyRows } = await supabase
       .from("messages")
-      .select("role, content")
+      .select("role, content, metadata")
       .eq("project_id", project.id)
       .in("role", ["user", "assistant"])
       .order("created_at", { ascending: false })
       .limit(HISTORY_TURNS);
-    const history = ((historyRows ?? []) as ConversationTurn[])
-      .slice()
+    // Failure notices are for the reader, not the model. Replayed, three
+    // failed attempts read as three turns of "Agent: generation_failed" — noise
+    // that crowds out the request the user keeps repeating.
+    const history: ConversationTurn[] = (historyRows ?? [])
+      .filter((row) => !isFailureNotice(row.metadata))
+      .map((row) => ({
+        role: row.role as ConversationTurn["role"],
+        content: row.content as string,
+      }))
       .reverse();
 
     const specMarkdown = readSpecMarkdown(previousWorkspace);
@@ -243,7 +250,38 @@ export async function executeGeneration({
         }));
     }
 
-    if (planNeedsClarification(plan)) {
+    const intent = planIntent(plan);
+
+    if (intent === "answer") {
+      // A question gets an answer, read from the source, and nothing else: no
+      // files, no build, no version, no credit.
+      emit({ type: "phase", phase: "answering" });
+      const { reply } = await provider
+        .answer({ ...input, timeoutMs: remainingMs() - TAIL_RESERVE_MS })
+        .catch((error: unknown) => {
+          throw labelStage(error, "answer");
+        });
+      // Cancelled rather than succeeded so it spends no credit; the cost still
+      // counts against the shared budget, since the model call was real.
+      await settle("cancelled", 0.01, "answered");
+      await Promise.all([
+        supabase
+          .from("projects")
+          .update({ status: project.current_version_id ? "ready" : "draft" })
+          .eq("id", project.id),
+        supabase.from("messages").insert({
+          project_id: project.id,
+          role: "assistant",
+          content: reply,
+          metadata: { kind: "answer" },
+        }),
+      ]);
+      emit({ type: "answer", text: reply });
+      await checkpointAt("failed", { error: "answered" });
+      return;
+    }
+
+    if (intent === "clarify") {
       // Nothing was built, so nothing is charged.
       await settle("cancelled", 0, "needs_clarification");
       await Promise.all([
@@ -490,6 +528,15 @@ export async function executeGeneration({
       () => undefined,
     );
     await settle("failed", 0, errorCode);
-    emit({ type: "error", code: errorCode });
+    emit({ type: "error", code: errorCode, detail: errorDetail });
   }
+}
+
+/** The assistant turn the failure handler writes; see the catch above. */
+function isFailureNotice(metadata: unknown) {
+  return (
+    typeof metadata === "object" &&
+    metadata !== null &&
+    (metadata as { error?: unknown }).error === true
+  );
 }

@@ -262,6 +262,7 @@ export const en: Dictionary = {
   phases: {
     reserving: "Reserving credit",
     planning: "Understanding the request",
+    answering: "Reading the code to answer",
     writing: "Writing code",
     building: "Bundling",
     repairing: "Something broke, fixing it",
@@ -318,6 +319,10 @@ export const en: Dictionary = {
     plan_timed_out:
       "Understanding the request timed out. Trying again usually works.",
     step_timed_out: "This step timed out. Please try again shortly.",
+    reasoning_exhausted:
+      "The model spent its whole output budget reasoning and wrote no code. Try splitting the request into smaller steps.",
+    output_truncated:
+      "The model's output hit the length limit and was cut off. Try splitting the request into smaller steps.",
     plan_named_no_files: "The plan did not name any files to change.",
   },
 };

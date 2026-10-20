@@ -8,6 +8,7 @@
 export type GenerationPhase =
   | "reserving"
   | "planning"
+  | "answering"
   | "writing"
   | "building"
   | "repairing"
@@ -42,6 +43,11 @@ export type GenerationEvent =
       understanding: string;
       questions: ClarifyingQuestion[];
     }
+  /**
+   * Terminal: the turn was a question, and this is the answer. Nothing was
+   * built and no version was made.
+   */
+  | { type: "answer"; text: string }
   /** Chain-of-thought is streaming. Progress, even with no answer text yet. */
   | { type: "thinking"; chars: number }
   | { type: "file-open"; path: string }
@@ -51,7 +57,12 @@ export type GenerationEvent =
    *  compiler output that is English regardless of interface language. */
   | { type: "log"; level: "info" | "error"; message: string }
   | { type: "done"; versionNumber: number; provider: string }
-  | { type: "error"; code: string }
+  /**
+   * `detail` is the redacted, truncated cause. The code says what kind of
+   * failure it was; without the detail nobody watching could say *why*, and
+   * the only copy lived in a database row the page did not show.
+   */
+  | { type: "error"; code: string; detail?: string }
   /**
    * Everything so far, folded into one frame.
    *
@@ -63,6 +74,22 @@ export type GenerationEvent =
    * replay was only ever a means of reconstructing.
    */
   | { type: "snapshot"; state: GenerationSnapshot };
+
+/**
+ * Events after which a run produces nothing more.
+ *
+ * One definition, because the registry, the stream route and the browser each
+ * used to keep their own list — and a question, missing from two of them, left
+ * its run registered as live and its stream open until the proxy cut it.
+ */
+export function isTerminalEvent(event: GenerationEvent) {
+  return (
+    event.type === "done" ||
+    event.type === "error" ||
+    event.type === "question" ||
+    event.type === "answer"
+  );
+}
 
 /** The subset a provider can emit while the model is still producing tokens. */
 export type StreamDelta = Extract<
@@ -101,8 +128,12 @@ export interface GenerationSnapshot {
   logs: string[];
   versionNumber?: number;
   provider?: string;
+  /** The reply, when the turn was a question rather than a change. */
+  answer?: string;
   /** A key into the dictionary's `errors` table, not a sentence. */
   errorCode?: string;
+  /** Redacted cause of the failure, for the reader who wants to know why. */
+  errorDetail?: string;
 }
 
 export const EMPTY_SNAPSHOT: GenerationSnapshot = {
@@ -145,8 +176,18 @@ export function foldGenerationEvent(
     case "question":
       return {
         ...state,
+        // Finished: the run stopped to ask. Left as "running", a reopened page
+        // saw a live run that would never produce anything.
+        status: "done",
         understanding: event.understanding,
         questions: event.questions,
+        activePath: undefined,
+      };
+    case "answer":
+      return {
+        ...state,
+        status: "done",
+        answer: event.text,
         activePath: undefined,
       };
     case "thinking":
@@ -186,6 +227,7 @@ export function foldGenerationEvent(
         ...state,
         status: "error",
         errorCode: event.code,
+        errorDetail: event.detail,
         activePath: undefined,
       };
   }

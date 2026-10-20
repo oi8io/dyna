@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   FALLBACK_CHANGE_SUMMARY,
   generationPlanSchema,
+  planIntent,
   planNeedsClarification,
 } from "@/server/llm/plan";
 
@@ -67,5 +68,68 @@ describe("generationPlanSchema tolerance", () => {
       questions: [{ question: "单人还是双人？", options: ["单人", "双人"] }],
     });
     expect(planNeedsClarification(plan)).toBe(true);
+  });
+});
+
+/**
+ * A question used to have nowhere to go but a rewrite: the plan could only
+ * name files or ask back. "究竟实现的咋样了？" rewrote five files.
+ */
+describe("planIntent", () => {
+  const changes = [{ path: "src/game/engine.ts", intent: "修合并" }];
+
+  it("answers when the model says the user asked", () => {
+    const plan = generationPlanSchema.parse({
+      intent: "answer",
+      understanding: "用户想知道当前实现的进度",
+    });
+    expect(planIntent(plan)).toBe("answer");
+  });
+
+  it("answers rather than rewrites when the model says both", () => {
+    // An unwanted rewrite cannot be taken back; an answer can be followed by
+    // "then fix it".
+    const plan = generationPlanSchema.parse({
+      intent: "answer",
+      understanding: "x",
+      changes,
+    });
+    expect(planIntent(plan)).toBe("answer");
+  });
+
+  it("answers a plan that names nothing to change instead of failing it", () => {
+    const plan = generationPlanSchema.parse({ understanding: "x" });
+    expect(planIntent(plan)).toBe("answer");
+  });
+
+  it("builds when there are changes and the model did not say otherwise", () => {
+    expect(
+      planIntent(generationPlanSchema.parse({ understanding: "x", changes })),
+    ).toBe("change");
+    expect(
+      planIntent(
+        generationPlanSchema.parse({ intent: "change", understanding: "x", changes }),
+      ),
+    ).toBe("change");
+  });
+
+  it("lets questions win over everything", () => {
+    const plan = generationPlanSchema.parse({
+      intent: "change",
+      understanding: "x",
+      changes,
+      questions: [{ question: "单人还是双人？", options: ["单人", "双人"] }],
+    });
+    expect(planIntent(plan)).toBe("clarify");
+  });
+
+  it("ignores an intent it does not recognise", () => {
+    const plan = generationPlanSchema.parse({
+      intent: "rewrite-everything",
+      understanding: "x",
+      changes,
+    });
+    expect(plan.intent).toBeUndefined();
+    expect(planIntent(plan)).toBe("change");
   });
 });

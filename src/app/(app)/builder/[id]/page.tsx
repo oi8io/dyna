@@ -89,6 +89,10 @@ export default async function BuilderProjectPage({
       .select("id")
       .eq("project_id", project.id)
       .not("stage", "in", '("succeeded","failed")')
+      // A failed run deliberately keeps the stage it stopped at, so a retry
+      // can resume from there. Matching on stage alone took every such run
+      // for a live one, and the page tried to reattach to it on every load.
+      .in("status", ["queued", "running"])
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle(),

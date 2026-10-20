@@ -3,6 +3,7 @@ import {
   type GenerationEvent,
   type GenerationSnapshot,
   foldGenerationEvent,
+  isTerminalEvent,
 } from "@/lib/generation-events";
 
 /**
@@ -95,7 +96,7 @@ export function startRun(jobId: string) {
   return {
     emit: (event: GenerationEvent) => {
       run.emit(event);
-      if (event.type === "done" || event.type === "error") {
+      if (isTerminalEvent(event)) {
         run.scheduleEviction(() => runs.delete(jobId));
       }
     },

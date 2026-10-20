@@ -1,5 +1,6 @@
 import type { StreamDelta } from "@/lib/generation-events";
 import type {
+  AnswerResult,
   GameGenerationProvider,
   PlanInput,
   PlanResult,
@@ -163,6 +164,19 @@ export class FakeGameProvider implements GameGenerationProvider {
 
   prebuiltArtifactHtml(input: PlanInput) {
     return createArtifact(input);
+  }
+
+  /**
+   * Demo mode never plans an answer — its plan always names files — so this
+   * only runs when a test or a future fixture asks for it directly.
+   */
+  async answer(input: PlanInput): Promise<AnswerResult> {
+    return {
+      reply: `演示模式不会阅读代码来回答问题。你问的是：${input.prompt}`,
+      provider: "fake",
+      model: "fake-game-agent",
+      usage: { inputTokens: 0, outputTokens: 0, estimatedCostUsd: 0 },
+    };
   }
 
   async write(input: WriteInput): Promise<WriteResult> {

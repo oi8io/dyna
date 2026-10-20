@@ -1,7 +1,10 @@
 import { z } from "zod";
 
 import { apiError } from "@/lib/api-error";
-import type { GenerationEvent } from "@/lib/generation-events";
+import {
+  type GenerationEvent,
+  isTerminalEvent,
+} from "@/lib/generation-events";
 import { encodeSseFrame } from "@/lib/sse";
 import { createClient } from "@/lib/supabase/server";
 import { getRun } from "@/server/generation/registry";
@@ -124,7 +127,7 @@ export async function GET(
 
       unsubscribe = run.subscribe((event, seq) => {
         write(event, seq);
-        if (event.type === "done" || event.type === "error") {
+        if (isTerminalEvent(event)) {
           stop();
           controller.close();
         }

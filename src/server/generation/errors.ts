@@ -19,6 +19,10 @@ export function generationErrorCode(error: unknown): ErrorCode {
   if (message.includes("duplicate key")) return "generation_in_progress";
   if (message.includes("snapshot_unreadable")) return "snapshot_unreadable";
   if (message.includes("plan_timed_out")) return "plan_timed_out";
+  // Before the timeout pattern: these are specific, and the fallback that
+  // follows them can itself time out with a message that would match it.
+  if (message.includes("reasoning_exhausted")) return "reasoning_exhausted";
+  if (message.includes("output_truncated")) return "output_truncated";
   if (/timed_out|aborted|AbortError|deadline/i.test(message)) return "step_timed_out";
 
   return "generation_failed";

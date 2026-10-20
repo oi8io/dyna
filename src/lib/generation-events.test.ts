@@ -5,6 +5,7 @@ import {
   type GenerationEvent,
   type GenerationSnapshot,
   foldGenerationEvent,
+  isTerminalEvent,
 } from "@/lib/generation-events";
 
 function foldAll(events: GenerationEvent[], from = EMPTY_SNAPSHOT) {
@@ -115,8 +116,40 @@ describe("foldGenerationEvent", () => {
     });
     expect(asked.activePath).toBeUndefined();
     expect(asked.questions).toHaveLength(1);
-    // Not terminal in the failure sense — nothing was built, nothing broke.
-    expect(asked.status).toBe("running");
+    // Finished, not failed: nothing was built and nothing broke. Left as
+    // "running", a page reopened afterwards waited on a run that was over.
+    expect(asked.status).toBe("done");
+  });
+
+  it("finishes a turn that was answered rather than built", () => {
+    const answered = foldGenerationEvent(foldAll(RUN.slice(0, 2)), {
+      type: "answer",
+      text: "合并逻辑在 engine.ts 的 slideRow 里，[2,2,2,0] 会得到 [4,2,0,0]。",
+    });
+    expect(answered.status).toBe("done");
+    expect(answered.answer).toContain("slideRow");
+    expect(answered.versionNumber).toBeUndefined();
+  });
+
+  it("keeps the cause of a failure, not just its code", () => {
+    const failed = foldGenerationEvent(EMPTY_SNAPSHOT, {
+      type: "error",
+      code: "reasoning_exhausted",
+      detail: "reasoning_exhausted: reasoned for 17417 chars",
+    });
+    expect(failed.errorCode).toBe("reasoning_exhausted");
+    expect(failed.errorDetail).toContain("17417");
+  });
+
+  it("treats every way a run can end as terminal", () => {
+    expect(isTerminalEvent({ type: "done", versionNumber: 2, provider: "x" })).toBe(true);
+    expect(isTerminalEvent({ type: "error", code: "generation_failed" })).toBe(true);
+    expect(
+      isTerminalEvent({ type: "question", understanding: "x", questions: [] }),
+    ).toBe(true);
+    expect(isTerminalEvent({ type: "answer", text: "x" })).toBe(true);
+    expect(isTerminalEvent({ type: "thinking", chars: 1 })).toBe(false);
+    expect(isTerminalEvent({ type: "phase", phase: "answering" })).toBe(false);
   });
 
   it("does not re-add a path the agent reopens", () => {

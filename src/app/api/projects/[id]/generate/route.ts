@@ -4,7 +4,10 @@ import { z } from "zod";
 import { apiError } from "@/lib/api-error";
 import { createClient } from "@/lib/supabase/server";
 import { createDetachedClient } from "@/server/generation/client";
-import { generationErrorCode } from "@/server/generation/errors";
+import {
+  generationErrorCode,
+  generationErrorDetail,
+} from "@/server/generation/errors";
 import { startRun } from "@/server/generation/registry";
 import type { GenerationCheckpoint } from "@/server/generation/run";
 import { executeGeneration } from "@/server/generation/run";
@@ -159,7 +162,11 @@ export async function POST(
     emit,
   }).catch((error: unknown) => {
     console.error("[generation_crashed]", error);
-    emit({ type: "error", code: "generation_failed" });
+    emit({
+      type: "error",
+      code: "generation_failed",
+      detail: generationErrorDetail(error),
+    });
   });
 
   return NextResponse.json({ runId }, { status: 202 });

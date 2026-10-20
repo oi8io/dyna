@@ -1,5 +1,6 @@
 import type { StreamDelta } from "@/lib/generation-events";
 import type {
+  AnswerResult,
   GameGenerationProvider,
   PlanInput,
   PlanResult,
@@ -8,6 +9,7 @@ import type {
 } from "@/server/llm/types";
 import { generationPlanSchema } from "@/server/llm/plan";
 import {
+  ANSWER_PROMPT,
   NAME_PROMPT,
   PLAN_PROMPT,
   REPAIR_PROMPT,
@@ -51,8 +53,40 @@ function stripCodeFence(value: string) {
     .replace(/\s*```$/, "");
 }
 
+/**
+ * The model's own output ceiling — 384K for every current DeepSeek V4 model —
+ * sent on every request.
+ *
+ * Deliberately not a setting. A lower cap saves nothing, since billing follows
+ * what was produced rather than what was allowed; all it decides is where an
+ * answer gets cut off. In thinking mode the cap covers the chain-of-thought as
+ * well, so the old 16K value let a long deliberation use up the entire budget
+ * and come back with no answer at all — reported as "DeepSeek returned an
+ * empty response" on every attempt at a detailed request. What bounds a call
+ * now is the run's wall-clock deadline.
+ *
+ * Sent explicitly because the API does not document what it uses by default.
+ */
+const MAX_OUTPUT_TOKENS = 384_000;
+
+/**
+ * Time held back from a reasoning attempt so that, if it runs out, the same
+ * request can still be answered without reasoning.
+ *
+ * Reasoning is the one part of a call whose length nobody controls. A write
+ * that thinks until the deadline produces nothing; a write that thinks for
+ * most of the budget and then falls back still produces a game.
+ */
+const NO_THINKING_RESERVE_MS = 150_000;
+const NO_THINKING_RESERVE_SHARE = 0.4;
+/** Below this, reasoning would be cut off before it got anywhere. */
+const MIN_THINKING_MS = 90_000;
+
 interface DeepSeekStreamChunk {
-  choices?: Array<{ delta?: { content?: string; reasoning_content?: string } }>;
+  choices?: Array<{
+    delta?: { content?: string; reasoning_content?: string };
+    finish_reason?: string | null;
+  }>;
   usage?: { prompt_tokens?: number; completion_tokens?: number };
 }
 
@@ -67,8 +101,12 @@ interface ChatMessage {
  *
  * The reassembled text — not the streamed fragments — is what gets validated
  * and persisted, so a hiccup in progress reporting cannot affect the result.
+ *
+ * `finishReason` is kept because "the stream ended" is not one outcome: `stop`
+ * is an answer, `length` is an answer cut off by the token cap — possibly
+ * before it began — and the two need different handling.
  */
-async function consumeStream(
+export async function consumeStream(
   response: Response,
   onProgress?: (delta: StreamDelta) => void,
   onAlive?: () => void,
@@ -81,6 +119,7 @@ async function consumeStream(
   let wire = "";
   let content = "";
   let reasoningChars = 0;
+  let finishReason: string | undefined;
   let usage = { prompt_tokens: 0, completion_tokens: 0 };
 
   try {
@@ -119,6 +158,9 @@ async function consumeStream(
           };
         }
 
+        const finished = chunk.choices?.[0]?.finish_reason;
+        if (finished) finishReason = finished;
+
         const reasoning = chunk.choices?.[0]?.delta?.reasoning_content;
         if (reasoning) {
           reasoningChars += reasoning.length;
@@ -136,7 +178,11 @@ async function consumeStream(
   }
 
   if (onProgress) for (const delta of parser.end()) onProgress(delta);
-  return { content, usage };
+  return { content, usage, finishReason, reasoningChars };
+}
+
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
 }
 
 async function callDeepSeek(
@@ -171,16 +217,25 @@ async function callDeepSeek(
   if (budget <= 0) throw new Error("generation_deadline_exceeded");
 
   const controller = new AbortController();
+  const startedAt = Date.now();
+  // Which clock fired, so the error says whether the model was slow or silent.
+  let abortedBy: "deadline" | "idle" | undefined;
   // Two clocks: a hard ceiling from the caller's budget, and an idle timer that
   // only fires when nothing at all has arrived. Reasoning tokens keep the idle
   // timer alive, so a model that thinks for two minutes is no longer mistaken
   // for a stalled request.
-  const ceiling = setTimeout(() => controller.abort(), budget);
+  const ceiling = setTimeout(() => {
+    abortedBy = "deadline";
+    controller.abort();
+  }, budget);
   let idle: ReturnType<typeof setTimeout> | undefined;
   const keepAlive = () => {
     clearTimeout(idle);
     idle = setTimeout(
-      () => controller.abort(),
+      () => {
+        abortedBy ??= "idle";
+        controller.abort();
+      },
       Math.min(env.DEEPSEEK_IDLE_TIMEOUT_MS, budget),
     );
   };
@@ -200,7 +255,7 @@ async function callDeepSeek(
           // Ignored by the API in thinking mode, so only sent when it applies.
           ...(options.thinking ? {} : { temperature: options.temperature }),
           thinking: { type: options.thinking ? "enabled" : "disabled" },
-          max_tokens: env.DEEPSEEK_MAX_OUTPUT_TOKENS,
+          max_tokens: MAX_OUTPUT_TOKENS,
           response_format: { type: "json_object" },
           stream: true,
           stream_options: { include_usage: true },
@@ -211,23 +266,106 @@ async function callDeepSeek(
     );
 
     if (!response.ok) {
+      // The body says why — a rejected parameter, an exhausted balance — and a
+      // bare status code sent every one of those to the same dead end.
+      const body = await response.text().catch(() => "");
       throw new Error(
-        `DeepSeek request failed (${response.status}) for ${options.model}`,
+        `DeepSeek request failed (${response.status}) for ${options.model}: ${body.slice(0, 300)}`,
       );
     }
 
-    const { content, usage } = await consumeStream(
-      response,
-      options.onProgress,
-      keepAlive,
-    );
-    if (!content) throw new Error("DeepSeek returned an empty response");
+    const { content, usage, finishReason, reasoningChars } =
+      await consumeStream(response, options.onProgress, keepAlive);
+
+    if (finishReason === "length") {
+      throw new Error(
+        content
+          ? `output_truncated: ${options.model} hit the ${MAX_OUTPUT_TOKENS}-token output cap mid-answer`
+          : `reasoning_exhausted: ${options.model} reasoned for ${reasoningChars} chars and hit the output cap before writing an answer`,
+      );
+    }
+    if (!content) {
+      throw new Error(
+        `DeepSeek returned an empty response (finish_reason=${finishReason ?? "none"}, reasoning=${reasoningChars} chars)`,
+      );
+    }
     return { content, usage };
+  } catch (error) {
+    if (abortedBy) {
+      const seconds = Math.round((Date.now() - startedAt) / 1000);
+      throw new Error(
+        `deepseek_${abortedBy}_timed_out: ${options.model} ${options.thinking ? "with" : "without"} reasoning, after ${seconds}s`,
+      );
+    }
+    throw error;
   } finally {
     clearTimeout(ceiling);
     clearTimeout(idle);
   }
 }
+
+/**
+ * Whether a failed reasoning attempt is worth repeating without reasoning.
+ *
+ * Only failures that reasoning itself causes: running out of budget while
+ * thinking, or running out of time. A rejected request or malformed answer
+ * would fail the same way again.
+ */
+function isReasoningFailure(error: unknown) {
+  return /reasoning_exhausted|deepseek_(deadline|idle)_timed_out/.test(
+    errorMessage(error),
+  );
+}
+
+/**
+ * Calls the model with reasoning when there is time for it, and falls back to
+ * answering without reasoning when that attempt fails.
+ *
+ * The reasoning attempt gets the budget minus a reserve; the reserve is what
+ * the fallback runs in. Without it, a long deliberation consumed the entire
+ * run and the user got an error instead of a game.
+ */
+async function callWithReasoningFallback(
+  messages: ChatMessage[],
+  options: {
+    temperature: number;
+    model: string;
+    thinking: boolean;
+    onProgress?: (delta: StreamDelta) => void;
+    timeoutMs?: number;
+  },
+) {
+  const env = getServerEnv();
+  const startedAt = Date.now();
+  const budget = options.timeoutMs ?? env.DEEPSEEK_TIMEOUT_MS;
+  const reserve = Math.max(
+    NO_THINKING_RESERVE_MS,
+    budget * NO_THINKING_RESERVE_SHARE,
+  );
+
+  if (options.thinking && budget - reserve >= MIN_THINKING_MS) {
+    try {
+      return await callDeepSeek(messages, {
+        ...options,
+        thinking: true,
+        timeoutMs: budget - reserve,
+      });
+    } catch (error) {
+      if (!isReasoningFailure(error)) throw error;
+      console.warn("[deepseek_reasoning_fallback]", errorMessage(error));
+      // The counter would otherwise sit at the abandoned attempt's total.
+      options.onProgress?.({ type: "thinking", chars: 0 });
+    }
+  }
+
+  return callDeepSeek(messages, {
+    ...options,
+    thinking: false,
+    timeoutMs: budget - (Date.now() - startedAt),
+  });
+}
+
+const answerResponseSchema = z.object({ reply: z.string().min(1).max(8000) });
 
 /**
  * How much source to inline before falling back to the manifest.
@@ -406,6 +544,55 @@ export class DeepSeekGameProvider implements GameGenerationProvider {
     };
   }
 
+  /**
+   * Answers a question about the project without changing it.
+   *
+   * Gets the source, which planning never sees: "is the merge logic right
+   * now?" can only be answered by reading the merge logic, and an answer
+   * built from what earlier turns *said* they did repeats their mistakes.
+   * The stronger model and reasoning, because checking code against a list of
+   * rules is exactly the work reasoning is for.
+   */
+  async answer(input: PlanInput): Promise<AnswerResult> {
+    const env = getServerEnv();
+    const { content, usage } = await callWithReasoningFallback(
+      [
+        { role: "system", content: ANSWER_PROMPT },
+        {
+          role: "user",
+          content: `${contextBlock(input, { includeSource: true })}\n\nUser question:\n${input.prompt}`,
+        },
+      ],
+      {
+        temperature: 0.3,
+        model: env.DEEPSEEK_MODEL,
+        thinking: true,
+        timeoutMs: input.timeoutMs,
+      },
+    );
+
+    const raw = stripCodeFence(content);
+    let reply: string;
+    try {
+      reply = answerResponseSchema.parse(JSON.parse(raw) as unknown).reply;
+    } catch {
+      // A reply that ignored the JSON envelope is still a reply. Showing it
+      // beats failing a question over packaging.
+      reply = raw.slice(0, 8000);
+    }
+
+    return {
+      reply,
+      provider: "deepseek" as const,
+      model: env.DEEPSEEK_MODEL,
+      usage: {
+        inputTokens: usage.prompt_tokens,
+        outputTokens: usage.completion_tokens,
+        estimatedCostUsd: 0.01,
+      },
+    };
+  }
+
   async write(input: WriteInput): Promise<WriteResult> {
     const env = getServerEnv();
 
@@ -446,7 +633,7 @@ export class DeepSeekGameProvider implements GameGenerationProvider {
     // agree across these files, and deciding them in one context is what makes
     // them agree — writing a file at a time left each one guessing about the
     // others and produced import paths that pointed at nothing.
-    const { content, usage } = await callDeepSeek(messages, {
+    const { content, usage } = await callWithReasoningFallback(messages, {
       temperature: input.kind === "edit" ? 0.2 : 0.6,
       model: env.DEEPSEEK_MODEL,
       thinking: env.DEEPSEEK_WRITE_THINKING,

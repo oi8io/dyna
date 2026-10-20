@@ -59,6 +59,14 @@ export interface GenerationUsage {
   estimatedCostUsd: number;
 }
 
+export interface AnswerResult {
+  /** Prose for the user, in the language they asked in. */
+  reply: string;
+  provider: "fake" | "deepseek";
+  model: string;
+  usage: GenerationUsage;
+}
+
 export interface PlanResult {
   plan: GenerationPlan;
   provider: "fake" | "deepseek";
@@ -77,6 +85,12 @@ export interface GameGenerationProvider {
   nameProject(prompt: string): Promise<string>;
   /** Stage one: decide what to do, or ask. Writes no code. */
   plan(input: PlanInput): Promise<PlanResult>;
+  /**
+   * Answers a question about the project from its current source, and changes
+   * nothing. The path for a turn whose plan says the user asked rather than
+   * requested — which used to have nowhere to go but a rewrite.
+   */
+  answer(input: PlanInput): Promise<AnswerResult>;
   /**
    * Stage two: write every planned file in one pass.
    *

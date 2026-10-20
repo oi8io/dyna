@@ -62,12 +62,6 @@ const serverEnvSchema = z.object({
    * progress even though no answer text has appeared yet.
    */
   DEEPSEEK_IDLE_TIMEOUT_MS: z.coerce.number().int().positive().default(45_000),
-  DEEPSEEK_MAX_OUTPUT_TOKENS: z.coerce
-    .number()
-    .int()
-    .positive()
-    .max(65_536)
-    .default(16_384),
   APP_PUBLIC_BUDGET_USD: optionalPositiveNumber,
   APP_NEW_USER_CREATE_LIMIT: optionalPositiveInteger,
   APP_NEW_USER_EDIT_LIMIT: optionalPositiveInteger,

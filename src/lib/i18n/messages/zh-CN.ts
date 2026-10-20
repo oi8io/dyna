@@ -257,6 +257,7 @@ export const zhCN = {
   phases: {
     reserving: "正在确认额度",
     planning: "正在理解需求",
+    answering: "正在看代码回答",
     writing: "正在写代码",
     building: "正在打包",
     repairing: "出了点问题，正在修",
@@ -315,6 +316,9 @@ export const zhCN = {
     snapshot_unreadable: "上一个版本的源码快照损坏，无法在其基础上修改。",
     plan_timed_out: "理解需求这一步超时了。稍后再试一次通常就好。",
     step_timed_out: "这一步超时了，稍后重试。",
+    reasoning_exhausted:
+      "模型把输出额度全花在思考上，没来得及写代码。可以把需求拆小一点再试。",
+    output_truncated: "模型的输出超过了上限，被截断了。可以把需求拆小一点再试。",
     plan_named_no_files: "计划没有指出要改哪些文件。",
   },
 };

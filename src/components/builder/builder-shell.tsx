@@ -68,24 +68,48 @@ interface BuilderShellProps {
  */
 function findFailure(messages: Message[]) {
   for (const message of [...messages].reverse()) {
-    const meta = message.metadata;
-    if (
-      meta &&
-      typeof meta === "object" &&
-      !Array.isArray(meta) &&
-      meta.error === true
-    ) {
-      return {
-        // Runs record a code; rows written before they did hold a sentence,
-        // which `translateError` passes through as unrecognised.
-        code:
-          typeof meta.errorCode === "string" ? meta.errorCode : message.content,
-        detail: typeof meta.detail === "string" ? meta.detail : undefined,
-        at: message.created_at,
-      };
-    }
+    const failure = failureOf(message);
+    if (failure) return { ...failure, at: message.created_at };
   }
   return undefined;
+}
+
+/**
+ * The failure an assistant turn records, if it is one.
+ *
+ * Read per message as well as for the latest, because a project that already
+ * has a runnable version never shows the no-version card — so a failed edit
+ * used to appear in the conversation as the bare code "generation_failed",
+ * with its cause stored right beside it and never rendered.
+ */
+function failureOf(message: Message) {
+  const meta = message.metadata;
+  if (
+    !meta ||
+    typeof meta !== "object" ||
+    Array.isArray(meta) ||
+    meta.error !== true
+  ) {
+    return undefined;
+  }
+  return {
+    // Runs record a code; rows written before they did hold a sentence,
+    // which `translateError` passes through as unrecognised.
+    code: typeof meta.errorCode === "string" ? meta.errorCode : message.content,
+    detail: typeof meta.detail === "string" ? meta.detail : undefined,
+  };
+}
+
+/** A collapsed cause under a failure notice; closed, it costs one line. */
+function FailureDetail({ label, detail }: { label: string; detail: string }) {
+  return (
+    <details className="mt-1.5 text-xs">
+      <summary className="cursor-pointer select-none opacity-70">{label}</summary>
+      <pre className="scrollbar-thin mt-1.5 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-md border border-line bg-canvas p-2 text-[11px] leading-5 text-ink-soft">
+        <code>{detail}</code>
+      </pre>
+    </details>
+  );
 }
 
 function buildLogMessage(entry: Json) {
@@ -294,9 +318,15 @@ export function BuilderShell({
           the builder read like something had broken, so it goes in the
           conversation with the turn it belongs to. */}
       {errorCode && !isDetached && (
-        <p className="rounded-lg border border-accent/25 bg-accent-soft px-4 py-3 text-sm text-accent-hover lg:shrink-0">
-          {translateError(t, errorCode)}
-        </p>
+        <div className="rounded-lg border border-accent/25 bg-accent-soft px-4 py-3 text-sm text-accent-hover lg:shrink-0">
+          <p>{translateError(t, errorCode)}</p>
+          {stream.errorDetail && (
+            <FailureDetail
+              label={t.builder.failureDetail}
+              detail={stream.errorDetail}
+            />
+          )}
+        </div>
       )}
 
       <div className="grid gap-4 lg:min-h-0 lg:flex-1 lg:grid-cols-[360px_minmax(0,1fr)]">
@@ -312,18 +342,41 @@ export function BuilderShell({
             ref={messageScrollRef}
             className="scrollbar-thin min-h-0 flex-1 space-y-3 overflow-y-auto p-4"
           >
-            {messages.map((message) => (
-              <div
-                key={message.id}
-                className={
-                  message.role === "user"
-                    ? "ml-8 rounded-lg rounded-br-sm bg-ink p-3 text-sm leading-6 text-canvas"
-                    : "mr-6 rounded-lg rounded-bl-sm border border-line bg-canvas-sunken p-3 text-sm leading-6 text-ink-soft"
-                }
-              >
-                {message.content}
+            {messages.map((message) => {
+              const failure =
+                message.role === "assistant" ? failureOf(message) : undefined;
+              return (
+                <div
+                  key={message.id}
+                  className={
+                    message.role === "user"
+                      ? "ml-8 whitespace-pre-wrap rounded-lg rounded-br-sm bg-ink p-3 text-sm leading-6 text-canvas"
+                      : failure
+                        ? "mr-6 rounded-lg rounded-bl-sm border border-accent/25 bg-accent-soft p-3 text-sm leading-6 text-accent-hover"
+                        : "mr-6 whitespace-pre-wrap rounded-lg rounded-bl-sm border border-line bg-canvas-sunken p-3 text-sm leading-6 text-ink-soft"
+                  }
+                >
+                  {failure ? (
+                    <>
+                      <p>{translateError(t, failure.code)}</p>
+                      {failure.detail && (
+                        <FailureDetail
+                          label={t.builder.failureDetail}
+                          detail={failure.detail}
+                        />
+                      )}
+                    </>
+                  ) : (
+                    message.content
+                  )}
+                </div>
+              );
+            })}
+            {stream.answer && (
+              <div className="mr-6 whitespace-pre-wrap rounded-lg rounded-bl-sm border border-line bg-canvas-sunken p-3 text-sm leading-6 text-ink-soft">
+                {stream.answer}
               </div>
-            ))}
+            )}
             {stream.understanding && !stream.questions.length && (
               <div className="mr-6 space-y-2 rounded-lg border border-line bg-canvas-sunken p-3 text-sm leading-6 text-ink-soft">
                 <p className="text-ink">{stream.understanding}</p>

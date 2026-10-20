@@ -108,8 +108,22 @@ export function watchGeneration({
       onEvent(event);
       if (event.type === "done") finish({ ok: true });
       if (event.type === "error") finish({ ok: false, errorCode: event.code });
-      // A question ends the run without building anything.
+      // A question ends the run without building anything, and stays on the
+      // page for the user to answer.
       if (event.type === "question") finish({ ok: false });
+      // An answer is already stored as a message; the reload shows it in the
+      // conversation where it belongs.
+      if (event.type === "answer") finish({ ok: true });
+      // Attached after the run had already ended: the snapshot is all there
+      // will be, and waiting for a terminal event that already happened only
+      // ended in a misleading "connection lost".
+      if (event.type === "snapshot" && event.state.status !== "running") {
+        finish(
+          event.state.status === "error"
+            ? { ok: false, errorCode: event.state.errorCode }
+            : { ok: true },
+        );
+      }
     };
 
     source.onerror = () => {

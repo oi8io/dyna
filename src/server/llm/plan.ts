@@ -24,7 +24,19 @@ export const clarifyingQuestionSchema = z.object({
  */
 export const FALLBACK_CHANGE_SUMMARY = "__no_change_summary__";
 
+/**
+ * What kind of turn this is.
+ *
+ * Without it every turn was a build: a plan could only list files to rewrite or
+ * ask a question, so "how far along is it?" was answered by rewriting five
+ * files — and reported as a change.
+ */
+export const turnIntentSchema = z.enum(["change", "answer", "clarify"]);
+export type TurnIntent = z.infer<typeof turnIntentSchema>;
+
 export const generationPlanSchema = z.object({
+  /** Absent on older plans and from models that skip it; see `planIntent`. */
+  intent: turnIntentSchema.optional().catch(undefined),
   understanding: z.string().min(1).max(800),
   changes: z
     .array(
@@ -53,4 +65,20 @@ export type GenerationPlan = z.infer<typeof generationPlanSchema>;
  */
 export function planNeedsClarification(plan: GenerationPlan) {
   return plan.questions.length > 0;
+}
+
+/**
+ * Decides what the run does with a plan.
+ *
+ * Questions win, as before. Then the model's own classification — and when it
+ * says "answer", that holds even if it also listed files: a turn that asked
+ * something gets an answer and the user can ask for the fix, whereas an
+ * unwanted rewrite cannot be taken back. A plan that names nothing to change
+ * is answered rather than failed: there is no build to run, and an answer is
+ * more useful than "plan_named_no_files".
+ */
+export function planIntent(plan: GenerationPlan): TurnIntent {
+  if (planNeedsClarification(plan)) return "clarify";
+  if (plan.intent === "answer" || !plan.changes.length) return "answer";
+  return "change";
 }

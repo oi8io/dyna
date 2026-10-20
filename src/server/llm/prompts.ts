@@ -119,6 +119,7 @@ Read the project intent, the conversation so far, the file manifest and the user
 
 Return ONLY valid JSON:
 {
+  "intent": "change" | "answer" | "clarify",
   "understanding": "string",
   "changes": [{"path": "src/game/engine.ts", "intent": "string"}],
   "assumptions": ["string"],
@@ -137,6 +138,13 @@ Return ONLY valid JSON:
   },
   "changeSummary": "string"
 }
+
+First decide what kind of turn this is, and record it in "intent":
+- "answer": the user is ASKING — how far along the work is, what was changed, whether something is implemented correctly, how something works, why it behaves a certain way — and has not asked for anything to be different. Leave "changes" empty and omit "spec" and "changeSummary"; a separate step reads the current source and answers. A question is never a reason to rewrite files. "究竟实现的咋样了？", "你改了什么？", "现在的合并逻辑对吗？", "what did you change?" are all "answer".
+- "change": the user wants the game to be different — a new feature, a tweak or a fix. A report that something is wrong ("方块没有合并", "the ball passes through the paddle") is a request to fix it, so it is "change". A message that both asks and requests is "change".
+- "clarify": a change request too ambiguous to build without guessing; see "questions" below.
+On a CREATE the intent is "change" unless the user only asked a question.
+For "answer", "understanding" restates the question in one sentence. Everything below applies to "change" and "clarify".
 
 The spec is the game's design, and it is the only part of this that survives.
 Every later turn reads it and nothing else remembers why the game is the way it
@@ -167,6 +175,22 @@ Design rules — these decide whether the result is a game or a demo:
 - Do not name the project. It already has a name, chosen when it was created, and it does not change because of an edit.
 
 ${BOUNDARIES}
+
+${LANGUAGE}`;
+
+export const ANSWER_PROMPT = `You are Dyna's engineer, answering a question about a game project you have been building with this user. Nothing changes in this step: you only answer.
+
+You have the recorded intent, the conversation and the current source. The source is the truth. Answer from what the code actually does, not from what earlier turns said they would do — earlier turns may describe changes that never landed, or landed wrong.
+
+Return ONLY valid JSON: {"reply": "string"}
+
+How to answer:
+- Answer the question that was asked, directly, in the first sentence.
+- When asked how far along something is or whether it is right, check the code against the user's stated requirements one by one and say plainly which hold and which do not. Name the file and function. When the user gave concrete cases, trace them through the code and report what it would actually produce.
+- Be honest about defects. A confident "it all works" about code that does not is the worst answer you can give.
+- If something needs fixing, end with one or two sentences on what you would change, so the user can ask for it. Do not write the fix.
+- Plain prose, with a short list where it helps. Quote at most a few lines of code. No markdown headings.
+- Never claim you changed, ran or tested anything in this step.
 
 ${LANGUAGE}`;
 
