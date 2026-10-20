@@ -16,6 +16,8 @@ interface RunGenerationOptions {
   projectId: string;
   prompt: string;
   kind: "create" | "edit";
+  /** Continue this stopped run from its checkpoint instead of starting over. */
+  resumeJobId?: string;
   onEvent: (event: GenerationEvent) => void;
   /** Fired when the connection drops and again when it comes back. */
   onConnectionChange?: (connected: boolean) => void;
@@ -32,6 +34,7 @@ export async function runGeneration({
   projectId,
   prompt,
   kind,
+  resumeJobId,
   onEvent,
   onConnectionChange,
 }: RunGenerationOptions): Promise<GenerationOutcome> {
@@ -42,6 +45,7 @@ export async function runGeneration({
       prompt,
       kind,
       idempotencyKey: crypto.randomUUID(),
+      ...(resumeJobId ? { resumeJobId } : {}),
     }),
   });
 

@@ -58,13 +58,19 @@ export function useGenerationStream() {
   }, []);
 
   const start = useCallback(
-    async (projectId: string, prompt: string, kind: "create" | "edit") => {
+    async (
+      projectId: string,
+      prompt: string,
+      kind: "create" | "edit",
+      resumeJobId?: string,
+    ) => {
       setState({ ...IDLE, busy: true });
       return settle(
         await runGeneration({
           projectId,
           prompt,
           kind,
+          resumeJobId,
           onEvent: apply,
           onConnectionChange,
         }),

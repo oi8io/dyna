@@ -239,6 +239,8 @@ export const en: Dictionary = {
     failureDetail: "Error detail",
     retrying: "Retrying…",
     retryOriginal: "Rebuild from the original request",
+    resumeFromCheckpoint: "Continue from where it stopped",
+    regenerate: "Start over",
     changedThisTurn: "Changed this turn",
     projectFiles: "Project files",
     noFileYet: "No file yet",
@@ -323,6 +325,10 @@ export const en: Dictionary = {
       "The model spent its whole output budget reasoning and wrote no code. Try splitting the request into smaller steps.",
     output_truncated:
       "The model's output hit the length limit and was cut off. Try splitting the request into smaller steps.",
+    upstream_unavailable:
+      "The model service is briefly unavailable. Wait a moment, then continue from where it stopped.",
+    resume_unavailable:
+      "That checkpoint can no longer be used: it expired, the project has a newer version, or the conversation moved on. Please regenerate.",
     plan_named_no_files: "The plan did not name any files to change.",
   },
 };

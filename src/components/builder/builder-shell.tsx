@@ -6,6 +6,7 @@ import {
   LoaderCircle,
   RotateCcw,
   Send,
+  StepForward,
   SquareTerminal,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
@@ -57,6 +58,11 @@ interface BuilderShellProps {
    * response, so a reopened page had no way to ask about it.
    */
   activeRunId?: string;
+  /**
+   * The stopped run that can be continued from its checkpoint, if any. Decided
+   * on the server by the rule the generate route enforces.
+   */
+  resumableJobId?: string;
 }
 
 /**
@@ -97,7 +103,16 @@ function failureOf(message: Message) {
     // which `translateError` passes through as unrecognised.
     code: typeof meta.errorCode === "string" ? meta.errorCode : message.content,
     detail: typeof meta.detail === "string" ? meta.detail : undefined,
+    jobId: typeof meta.jobId === "string" ? meta.jobId : undefined,
   };
+}
+
+/** The user turn a failure notice answers: the nearest one before it. */
+function requestBefore(messages: Message[], index: number) {
+  for (let at = index - 1; at >= 0; at -= 1) {
+    if (messages[at].role === "user") return messages[at].content;
+  }
+  return undefined;
 }
 
 /** A collapsed cause under a failure notice; closed, it costs one line. */
@@ -138,6 +153,7 @@ export function BuilderShell({
   lastErrorCode,
   autoStart = false,
   activeRunId,
+  resumableJobId,
 }: BuilderShellProps) {
   const t = useT();
   const router = useRouter();
@@ -214,6 +230,24 @@ export function BuilderShell({
     // reload is the cheapest way to pick all of that up at once. A turn that
     // ended in a question changed nothing, so it stays on the page.
     if (result.ok) window.location.reload();
+  }
+
+  /**
+   * Continues a stopped run from its checkpoint: its plan and whatever files it
+   * had already written. No new user turn — the request is already there.
+   */
+  async function resumeTurn(content: string, jobId: string) {
+    setWorkspaceTab("code");
+    const result = await start(
+      project.id,
+      content,
+      hasVersion ? "edit" : "create",
+      jobId,
+    );
+    if (result.ok) window.location.reload();
+    // The checkpoint went stale after the page was rendered; refreshing takes
+    // the button away and leaves "start over".
+    else if (result.errorCode === "resume_unavailable") router.refresh();
   }
 
   async function edit(event: FormEvent) {
@@ -342,9 +376,18 @@ export function BuilderShell({
             ref={messageScrollRef}
             className="scrollbar-thin min-h-0 flex-1 space-y-3 overflow-y-auto p-4"
           >
-            {messages.map((message) => {
+            {messages.map((message, index) => {
               const failure =
                 message.role === "assistant" ? failureOf(message) : undefined;
+              // Only the notice that ends the conversation offers a way on:
+              // anything after it means the user already moved on.
+              const isLast = index === messages.length - 1;
+              const request =
+                failure && isLast ? requestBefore(messages, index) : undefined;
+              const resumeJobId =
+                failure?.jobId && failure.jobId === resumableJobId
+                  ? failure.jobId
+                  : undefined;
               return (
                 <div
                   key={message.id}
@@ -364,6 +407,27 @@ export function BuilderShell({
                           label={t.builder.failureDetail}
                           detail={failure.detail}
                         />
+                      )}
+                      {request && !busy && (
+                        <div className="mt-2.5 flex flex-wrap gap-2">
+                          {resumeJobId && (
+                            <Button
+                              size="sm"
+                              onClick={() => resumeTurn(request, resumeJobId)}
+                            >
+                              <StepForward className="size-3.5" />
+                              {t.builder.resumeFromCheckpoint}
+                            </Button>
+                          )}
+                          <Button
+                            size="sm"
+                            variant={resumeJobId ? "ghost" : "secondary"}
+                            onClick={() => submitTurn(request)}
+                          >
+                            <RotateCcw className="size-3.5" />
+                            {t.builder.regenerate}
+                          </Button>
+                        </div>
                       )}
                     </>
                   ) : (

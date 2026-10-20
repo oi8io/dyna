@@ -9,6 +9,7 @@ import {
   generationErrorDetail,
 } from "@/server/generation/errors";
 import { startRun } from "@/server/generation/registry";
+import { resumeRefusal } from "@/server/generation/resume";
 import type { GenerationCheckpoint } from "@/server/generation/run";
 import { executeGeneration } from "@/server/generation/run";
 import { isLiveGenerationReady } from "@/server/env";
@@ -20,6 +21,11 @@ const bodySchema = z.object({
   prompt: z.string().trim().min(3).max(4000),
   kind: z.enum(["create", "edit"]).default("edit"),
   idempotencyKey: z.string().min(8).max(120),
+  /**
+   * Continue this stopped run from its checkpoint. Only ever set by the
+   * "continue" button; a typed message is always a new turn.
+   */
+  resumeJobId: z.uuid().optional(),
 });
 
 /**
@@ -60,36 +66,69 @@ export async function POST(
     return apiError("project_not_found", 404);
   }
 
-  // An earlier attempt that stopped part-way. Its plan and files are carried
-  // into this one, so a failure at the build step does not throw away a
-  // finished plan and a finished set of files — and does not answer the same
-  // request differently the second time.
-  const { data: previousJob } = await supabase
-    .from("generation_jobs")
-    .select("id, stage, plan, draft_files, draft_artifact_html, attempts")
-    .eq("project_id", project.id)
-    .not("stage", "in", '("succeeded","failed")')
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+  // An earlier attempt that stopped part-way with its checkpoint still open,
+  // and the project's latest job of any kind — a resume is only valid for the
+  // run nothing has happened after.
+  const [{ data: previousJob }, { data: latestJob }] = await Promise.all([
+    supabase
+      .from("generation_jobs")
+      .select(
+        "id, kind, stage, status, plan, draft_files, draft_artifact_html, attempts, created_at, completed_at",
+      )
+      .eq("project_id", project.id)
+      .not("stage", "in", '("succeeded","failed")')
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+    supabase
+      .from("generation_jobs")
+      .select("id")
+      .eq("project_id", project.id)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+  ]);
 
-  // Only a retry of the same request may inherit it. A new instruction after a
-  // failure is a different question, and answering it with the old plan would
-  // build the thing the user just moved on from.
-  const storedPrompt = (previousJob?.plan as { prompt?: string } | null)?.prompt;
-  const isRetryOfSameRequest =
-    Boolean(previousJob) && storedPrompt === body.data.prompt;
+  // A typed message is a new turn, always. Its checkpoint is inherited only
+  // when the user explicitly asked to continue that run, and only while
+  // continuing still makes sense — see `resumeRefusal`.
+  let checkpoint: GenerationCheckpoint | undefined;
+  let prompt = body.data.prompt;
+  let kind = body.data.kind;
+  const resuming = Boolean(body.data.resumeJobId);
 
-  const checkpoint: GenerationCheckpoint | undefined =
-    previousJob && isRetryOfSameRequest
-      ? {
-          stage: previousJob.stage as GenerationCheckpoint["stage"],
-          plan: previousJob.plan ?? undefined,
-          draftFiles: (previousJob.draft_files ?? {}) as Record<string, string>,
-          draftArtifactHtml: previousJob.draft_artifact_html ?? undefined,
-          attempts: (previousJob.attempts as number) ?? 0,
-        }
-      : undefined;
+  if (body.data.resumeJobId) {
+    const candidate =
+      previousJob?.id === body.data.resumeJobId ? previousJob : undefined;
+    const { data: currentVersion } = project.current_version_id
+      ? await supabase
+          .from("project_versions")
+          .select("created_at")
+          .eq("id", project.current_version_id)
+          .maybeSingle()
+      : { data: null };
+    const refusal = resumeRefusal(candidate, {
+      latestJobId: latestJob?.id,
+      currentVersionCreatedAt: currentVersion?.created_at,
+    });
+    if (refusal || !candidate) {
+      return apiError("resume_unavailable", 409);
+    }
+
+    checkpoint = {
+      stage: candidate.stage as GenerationCheckpoint["stage"],
+      plan: candidate.plan ?? undefined,
+      draftFiles: (candidate.draft_files ?? {}) as Record<string, string>,
+      draftArtifactHtml: candidate.draft_artifact_html ?? undefined,
+      attempts: (candidate.attempts as number) ?? 0,
+    };
+    // The run's own request, not whatever the button sent along: the plan was
+    // made for these words. A run that stopped before planning stored none,
+    // and then the client's copy of the original turn is all there is.
+    const storedPrompt = (candidate.plan as { prompt?: string } | null)?.prompt;
+    prompt = storedPrompt ?? prompt;
+    kind = candidate.kind as typeof kind;
+  }
 
   // Reserved here rather than inside the run so the caller learns about an
   // exhausted budget as a status code, not as an event on a stream it has yet
@@ -100,7 +139,7 @@ export async function POST(
       "reserve_generation",
       {
         p_project_id: project.id,
-        p_kind: body.data.kind,
+        p_kind: kind,
         p_idempotency_key: body.data.idempotencyKey,
         p_reserved_usd: 0.05,
       },
@@ -126,12 +165,16 @@ export async function POST(
 
   await Promise.all([
     supabase.from("projects").update({ status: "generating" }).eq("id", project.id),
-    supabase.from("messages").insert({
-      project_id: project.id,
-      role: "user",
-      content: body.data.prompt,
-      metadata: { kind: body.data.kind },
-    }),
+    // A resume continues a turn that is already in the conversation; writing
+    // it again would show the user's request twice.
+    resuming
+      ? Promise.resolve()
+      : supabase.from("messages").insert({
+          project_id: project.id,
+          role: "user",
+          content: prompt,
+          metadata: { kind },
+        }),
   ]);
 
   if (previousJob && jobId && previousJob.id !== jobId) {
@@ -155,8 +198,8 @@ export async function POST(
     // working once the response is sent.
     supabase: createDetachedClient(session.access_token),
     project,
-    prompt: body.data.prompt,
-    kind: body.data.kind,
+    prompt,
+    kind,
     jobId,
     checkpoint,
     emit,

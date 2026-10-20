@@ -2,6 +2,7 @@ import { notFound, redirect } from "next/navigation";
 
 import { BuilderShell } from "@/components/builder/builder-shell";
 import { createClient } from "@/lib/supabase/server";
+import { resumeRefusal } from "@/server/generation/resume";
 import type {
   Message,
   Project,
@@ -42,6 +43,7 @@ export default async function BuilderProjectPage({
     { data: publishedData },
     { data: failedJob },
     { data: activeJob },
+    { data: latestJob },
   ] = await Promise.all([
     project.current_version_id
       ? supabase
@@ -96,9 +98,27 @@ export default async function BuilderProjectPage({
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle(),
+    // The only run that can be continued: the latest, if its checkpoint is
+    // still open. Judged here by the same rule the route enforces, so the
+    // page never offers a button the server would refuse.
+    supabase
+      .from("generation_jobs")
+      .select("id, stage, status, created_at, completed_at")
+      .eq("project_id", project.id)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
   ]);
 
   const version = versionData as ProjectVersion | null;
+  const resumableJobId =
+    latestJob &&
+    !resumeRefusal(latestJob, {
+      latestJobId: latestJob.id,
+      currentVersionCreatedAt: version?.created_at,
+    })
+      ? (latestJob.id as string)
+      : undefined;
   const messages = (messagesData ?? []) as Message[];
 
   // Zero messages means nothing has ever been attempted for this project — the
@@ -122,6 +142,7 @@ export default async function BuilderProjectPage({
       publishedVersionId={publishedData?.version_id ?? undefined}
       lastErrorCode={failedJob?.error_code ?? undefined}
       activeRunId={activeJob?.id ?? undefined}
+      resumableJobId={resumableJobId}
     />
   );
 }

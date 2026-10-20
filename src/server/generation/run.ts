@@ -15,6 +15,7 @@ import { getServerEnv } from "@/server/env";
 import {
   generationErrorCode,
   generationErrorDetail,
+  isResumableError,
 } from "@/server/generation/errors";
 import { getGameGenerationProvider } from "@/server/llm";
 import {
@@ -502,6 +503,8 @@ export async function executeGeneration({
   } catch (error) {
     const errorDetail = generationErrorDetail(error);
     const errorCode: ErrorCode = generationErrorCode(error);
+    // Demo runs keep no job row, so there is nothing to resume from.
+    const resumable = Boolean(jobId) && isResumableError(errorCode);
     console.error("[generation_failed]", {
       projectId: project.id,
       code: errorCode,
@@ -519,14 +522,23 @@ export async function executeGeneration({
         // holds it too so a row is legible on its own — in the database, in a
         // log, and in the rows written before this column existed.
         content: errorCode,
-        metadata: { error: true, errorCode, detail: errorDetail },
+        // `jobId` and `resumable` are what the page needs to offer "continue
+        // from here" on this notice and not on any other.
+        metadata: {
+          error: true,
+          errorCode,
+          detail: errorDetail,
+          jobId: jobId ?? null,
+          resumable,
+        },
       }),
     ]);
-    // The stage is left where it stopped, so the next attempt resumes there
-    // rather than restarting. Only the error and attempt count move.
-    await checkpointAt(currentStage, { error: errorDetail }).catch(
-      () => undefined,
-    );
+    // A failure worth retrying leaves the stage where it stopped, so a resume
+    // starts there rather than over. Any other closes the checkpoint: resuming
+    // it would replay the same failure from the same inputs.
+    await checkpointAt(resumable ? currentStage : "failed", {
+      error: errorDetail,
+    }).catch(() => undefined);
     await settle("failed", 0, errorCode);
     emit({ type: "error", code: errorCode, detail: errorDetail });
   }

@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { generationErrorCode } from "@/server/generation/errors";
+import {
+  generationErrorCode,
+  isResumableError,
+} from "@/server/generation/errors";
 
 /**
  * Everything unrecognised becomes "generation_failed", which tells the user
@@ -30,9 +33,54 @@ describe("generationErrorCode", () => {
     ).toBe("step_timed_out");
   });
 
+  it("names a model service that is briefly down", () => {
+    for (const message of [
+      "DeepSeek request failed (429) for deepseek-v4-pro: rate limited",
+      "DeepSeek request failed (503) for deepseek-v4-pro: overloaded",
+      "fetch failed",
+      "read ECONNRESET",
+    ]) {
+      expect(generationErrorCode(new Error(message))).toBe("upstream_unavailable");
+    }
+    // A rejected request is the request's fault, and would be rejected again.
+    expect(
+      generationErrorCode(
+        new Error("DeepSeek request failed (400) for deepseek-v4-pro: bad param"),
+      ),
+    ).toBe("generation_failed");
+  });
+
   it("still falls back for the unknown", () => {
     expect(generationErrorCode(new Error("something else"))).toBe(
       "generation_failed",
     );
+  });
+});
+
+/**
+ * Only failures that say nothing about the request keep a checkpoint. Resuming
+ * one that would recur replays it with the same plan and the same files.
+ */
+describe("isResumableError", () => {
+  it("keeps a checkpoint for time, reasoning and service failures", () => {
+    for (const code of [
+      "plan_timed_out",
+      "step_timed_out",
+      "reasoning_exhausted",
+      "upstream_unavailable",
+    ]) {
+      expect(isResumableError(code)).toBe(true);
+    }
+  });
+
+  it("closes it for failures that would recur", () => {
+    for (const code of [
+      "generation_failed",
+      "output_truncated",
+      "snapshot_unreadable",
+      "plan_named_no_files",
+    ]) {
+      expect(isResumableError(code)).toBe(false);
+    }
   });
 });

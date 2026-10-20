@@ -23,9 +23,40 @@ export function generationErrorCode(error: unknown): ErrorCode {
   // follows them can itself time out with a message that would match it.
   if (message.includes("reasoning_exhausted")) return "reasoning_exhausted";
   if (message.includes("output_truncated")) return "output_truncated";
+  // The model service, not the request: rate-limited, overloaded, or the
+  // connection dropped. The same request is likely to work a minute later.
+  if (
+    /DeepSeek request failed \((429|5\d\d)\)/.test(message) ||
+    /fetch failed|ECONNRESET|ECONNREFUSED|ETIMEDOUT|socket hang up|other side closed/i.test(
+      message,
+    )
+  ) {
+    return "upstream_unavailable";
+  }
   if (/timed_out|aborted|AbortError|deadline/i.test(message)) return "step_timed_out";
 
   return "generation_failed";
+}
+
+/**
+ * Failures that say nothing about the request — time, a model that thought too
+ * long, a service that was briefly down. The same plan and files are likely to
+ * work on a second attempt, so the run keeps its checkpoint for one.
+ *
+ * Everything else is assumed to recur: a broken plan, a build that still fails
+ * after repair, an unrecognised error. Resuming those would replay the same
+ * failure with the same inputs, so their checkpoint is closed and the only
+ * offer is to start over.
+ */
+const RESUMABLE_ERRORS: ReadonlySet<string> = new Set<ErrorCode>([
+  "plan_timed_out",
+  "step_timed_out",
+  "reasoning_exhausted",
+  "upstream_unavailable",
+]);
+
+export function isResumableError(code: string) {
+  return RESUMABLE_ERRORS.has(code);
 }
 
 /** Redacted, truncated detail for the console pane and the server log. */

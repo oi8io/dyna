@@ -234,6 +234,8 @@ export const zhCN = {
     failureDetail: "详细报错",
     retrying: "正在重试…",
     retryOriginal: "用原始需求重新生成",
+    resumeFromCheckpoint: "从断点继续",
+    regenerate: "重新生成",
     changedThisTurn: "本次改动",
     projectFiles: "项目文件",
     noFileYet: "还没有文件",
@@ -319,6 +321,9 @@ export const zhCN = {
     reasoning_exhausted:
       "模型把输出额度全花在思考上，没来得及写代码。可以把需求拆小一点再试。",
     output_truncated: "模型的输出超过了上限，被截断了。可以把需求拆小一点再试。",
+    upstream_unavailable: "模型服务暂时不可用，稍等一下再从断点继续。",
+    resume_unavailable:
+      "这个断点已经不能用了：已过期、项目已有新版本，或后面又有了新的对话。请重新生成。",
     plan_named_no_files: "计划没有指出要改哪些文件。",
   },
 };
