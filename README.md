@@ -160,6 +160,19 @@ pnpm check
 
 This runs TypeScript, ESLint, Vitest and a production build. Tests cover path traversal, template escape, CSP bypass, remote assets, open redirects, and compilation of the fake project's source.
 
+### Offline evaluation
+
+`pnpm eval` replays a fixed set of requests through the real generation path — the same provider, plan schema, clarification rule, file whitelist, cross-file import check, builder and artifact validation — with no database and no HTTP connection, and reports build pass rate, first-pass rate (before the repair round), clarification accuracy, a craft score over the rules the write prompt actually states, latency percentiles and cost computed from real token counts.
+
+```bash
+pnpm eval:smoke                    # free, six cases, checks the harness is wired up
+pnpm eval                          # free, the whole dataset in fake mode
+pnpm eval:live                     # calls DeepSeek for real; costs money
+pnpm eval -- --mode=live --repeat=3 --baseline=<previous>/report.json
+```
+
+Each run writes `report.json`, a Markdown report and the full workspace of every failing case to `evals/results/<timestamp>/`. Pointing `--baseline` at an earlier `report.json` adds a list of the cases that regressed and the ones that recovered — a metric that improved while a specific case broke is only visible per case. See [`evals/README.md`](evals/README.md).
+
 ## Layout
 
 ```text
@@ -173,6 +186,7 @@ src/server/template/     Locked game project template
 src/server/workspace/    File boundaries and log redaction
 src/server/build/        Inline/Sandbox builders
 supabase/migrations/     Schema, RLS, credit RPCs
+evals/                   Offline evaluation: dataset, runner, scorers
 ```
 
 ## External setup required to deploy your own

@@ -1,0 +1,30 @@
+{"id":"create-zh-breakout","kind":"create","prompt":"做一个打砖块游戏，方向键控制挡板，砖块分五行不同颜色，三条命，清空全部砖块算通关。","expectClarification":false,"tags":["zh","arcade","clear"]}
+{"id":"create-zh-snake","kind":"create","prompt":"做一个贪吃蛇，20x20 网格，吃到食物加一节并加十分，撞墙或撞到自己就结束，按空格重开。","expectClarification":false,"tags":["zh","grid","clear"]}
+{"id":"create-zh-2048","kind":"create","prompt":"做一个 2048，4x4 棋盘，方向键合并数字方块，每次移动后随机生成一个 2 或 4，出现 2048 算胜利。","expectClarification":false,"tags":["zh","puzzle","clear"]}
+{"id":"create-zh-flappy","kind":"create","prompt":"做一个 Flappy Bird，空格控制小鸟上升，随机高度的管道从右往左移动，撞到就结束并显示最高分。","expectClarification":false,"tags":["zh","arcade","clear"]}
+{"id":"create-zh-memory","kind":"create","prompt":"做一个翻牌记忆游戏，4x4 共 8 对图案，点击翻开两张，配对成功保持翻开，统计步数和用时。","expectClarification":false,"tags":["zh","casual","clear"]}
+{"id":"create-zh-tetris","kind":"create","prompt":"做一个俄罗斯方块，标准七种方块，方向键左右移动和旋转，下键加速，消行得分，方块堆到顶部结束。","expectClarification":false,"tags":["zh","puzzle","clear","hard"]}
+{"id":"create-zh-shooter","kind":"create","prompt":"做一个太空射击游戏，飞船左右移动，空格发射子弹，敌机成排从上方下落，被击中损失一条命，共三条命。","expectClarification":false,"tags":["zh","arcade","clear"]}
+{"id":"create-zh-runner","kind":"create","prompt":"做一个横版跑酷，角色自动向右跑，空格跳跃躲避仙人掌，速度随距离递增，撞到就结束并显示跑了多远。","expectClarification":false,"tags":["zh","arcade","clear"]}
+{"id":"create-zh-whack","kind":"create","prompt":"做一个打地鼠，3x3 洞口，地鼠随机冒头 1 秒，点中加十分，60 秒倒计时结束后显示总分。","expectClarification":false,"tags":["zh","casual","clear"]}
+{"id":"create-zh-minesweeper","kind":"create","prompt":"做一个扫雷，9x9 十个雷，左键翻开右键标旗，翻到空格自动展开相邻区域，踩雷显示全部雷位。","expectClarification":false,"tags":["zh","puzzle","clear","hard"]}
+{"id":"create-zh-pong","kind":"create","prompt":"做一个双人乒乓，左边玩家用 W/S，右边玩家用上下键，先得 11 分的一方获胜，球速每次反弹略微加快。","expectClarification":false,"tags":["zh","arcade","clear"]}
+{"id":"create-zh-sokoban","kind":"create","prompt":"做一个推箱子，三个内置关卡，方向键推箱子到目标点，全部就位进入下一关，按 R 重置当前关。","expectClarification":false,"tags":["zh","puzzle","clear","hard"]}
+{"id":"create-en-breakout","kind":"create","prompt":"Build a brick breaker: arrow keys move the paddle, five rows of bricks, three lives, and the ball speeds up slightly every ten bricks.","expectClarification":false,"tags":["en","arcade","clear"]}
+{"id":"create-en-snake","kind":"create","prompt":"Build a snake game on a 20x20 grid. Eating food grows the snake and scores ten points; hitting a wall or yourself ends the run. Space restarts.","expectClarification":false,"tags":["en","grid","clear"]}
+{"id":"create-en-typing","kind":"create","prompt":"Build a typing speed game: words fall from the top, type a word to destroy it, three misses ends the game, and show words-per-minute at the end.","expectClarification":false,"tags":["en","casual","clear"]}
+{"id":"create-en-tower","kind":"create","prompt":"Build a block-stacking tower game: a block slides left and right, click to drop it, the overhang is trimmed off, and the game ends when nothing lands.","expectClarification":false,"tags":["en","casual","clear"]}
+{"id":"create-en-simon","kind":"create","prompt":"Build a Simon-says memory game with four colored pads, a sequence that grows by one each round, and a game over on the first wrong pad.","expectClarification":false,"tags":["en","casual","clear"]}
+{"id":"create-en-maze","kind":"create","prompt":"Build a maze game with a randomly generated 15x15 maze, arrow-key movement, a visible timer, and a new maze on each win.","expectClarification":false,"tags":["en","puzzle","clear"]}
+{"id":"create-zh-rhythm","kind":"create","prompt":"做一个四轨下落式音游，方块沿轨道下落到判定线，按 D/F/J/K 命中，判定分完美和good，连击数显示在中间。","expectClarification":false,"tags":["zh","rhythm","clear","hard"]}
+{"id":"create-zh-idle","kind":"create","prompt":"做一个点击放置小游戏，点击按钮获得金币，可以花金币买三种自动产出的建筑，产出速度显示在界面上。","expectClarification":false,"tags":["zh","idle","clear"]}
+{"id":"ambiguous-zh-bare","kind":"create","prompt":"做个游戏","expectClarification":true,"tags":["zh","ambiguous"],"notes":"没有品类、玩法、操作方式，任何一条都不足以直接开工。"}
+{"id":"ambiguous-zh-vibe","kind":"create","prompt":"来个好玩的，像素风的那种","expectClarification":true,"tags":["zh","ambiguous"],"notes":"只给了美术风格，玩法完全缺失。"}
+{"id":"ambiguous-zh-multiplayer","kind":"create","prompt":"做个可以和朋友一起玩的对战游戏","expectClarification":true,"tags":["zh","ambiguous"],"notes":"同屏双人还是联网？平台不支持联网，必须问清楚。"}
+{"id":"ambiguous-en-bare","kind":"create","prompt":"make me something fun to play","expectClarification":true,"tags":["en","ambiguous"]}
+{"id":"ambiguous-en-rpg","kind":"create","prompt":"build an RPG with a story and character progression","expectClarification":true,"tags":["en","ambiguous"],"notes":"范围远超单文件产物能承载的体量，应当先确认要砍到什么程度。"}
+{"id":"ambiguous-zh-clone","kind":"create","prompt":"照着我上次玩的那个做一个","expectClarification":true,"tags":["zh","ambiguous"],"notes":"指代无法解析，模型不应当猜。"}
+{"id":"edit-zh-difficulty","kind":"edit","seedPrompt":"做一个打砖块游戏，方向键控制挡板，砖块分五行不同颜色，三条命。","prompt":"太简单了，把球速提高 30%，挡板缩短一点，并且每清掉一行再加一点速度。","expectClarification":false,"tags":["zh","edit","clear"]}
+{"id":"edit-zh-feature","kind":"edit","seedPrompt":"做一个贪吃蛇，20x20 网格，吃到食物加一节并加十分。","prompt":"加一个暂停功能，按 P 暂停和继续，暂停时在画面中间显示暂停字样。","expectClarification":false,"tags":["zh","edit","clear"]}
+{"id":"edit-en-visual","kind":"edit","seedPrompt":"Build a snake game on a 20x20 grid with a score in the corner.","prompt":"Make it dark mode: dark background, neon green snake, and a subtle glow on the food.","expectClarification":false,"tags":["en","edit","clear"]}
+{"id":"edit-zh-vague","kind":"edit","seedPrompt":"做一个太空射击游戏，飞船左右移动，空格发射子弹。","prompt":"手感不太对，改一下","expectClarification":true,"tags":["zh","edit","ambiguous"],"notes":"手感可能指移动加速度、射速、判定框，方向完全不同，应当问。"}

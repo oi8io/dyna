@@ -35,6 +35,11 @@ simple/
 # Generated project analysis
 graphify-out/
 
+# Evaluation runs: reports and generated artifacts are outputs, not source.
+# Commit a baseline deliberately by copying it out of here.
+evals/results/
+evals/.cache/
+
 # Internal planning and confidential source material.
 # docs/ is private in full — the write-up is delivered out of band, and PRD.md
 # quotes the confidential brief at length. Nothing under docs/ is published.

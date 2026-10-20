@@ -1,0 +1,2 @@
+{"id":"same","kind":"create","prompt":"a","expectClarification":false,"tags":["x"]}
+{"id":"same","kind":"create","prompt":"b","expectClarification":false,"tags":["x"]}

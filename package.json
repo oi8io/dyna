@@ -12,6 +12,9 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest",
     "test:run": "vitest run",
+    "eval": "node evals/run.mjs",
+    "eval:smoke": "node evals/run.mjs --mode=fake --filter=clear --limit=6 --concurrency=3",
+    "eval:live": "node evals/run.mjs --mode=live --concurrency=2",
     "check": "pnpm typecheck && pnpm lint && pnpm test:run && pnpm build"
   },
   "dependencies": {

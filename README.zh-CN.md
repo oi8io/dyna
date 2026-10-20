@@ -160,6 +160,21 @@ pnpm check
 
 它会执行 TypeScript、ESLint、Vitest 和生产构建。测试覆盖路径穿越、模板越权、CSP 绕过、远程资源、开放重定向和 Fake 工程源码编译。
 
+### 离线评测
+
+`pnpm eval` 把一批固定请求重放过真实的生成链路——同一个 provider、同一份 plan schema、同一条澄清规则、同一份文件白名单、同一个跨文件引用检查、同一个构建器和同一套产物校验——不需要数据库也不需要 HTTP 连接，产出构建通过率、首轮通过率（修复回合之前）、澄清判断准确率、按提示词明确要求过的规则计算的工艺分、时延分位数，以及按真实 token 数折算的成本。
+
+```bash
+pnpm eval:smoke                    # 零成本，6 个用例，验证链路是否通
+pnpm eval                          # 零成本，fake 模式跑完整数据集
+pnpm eval:live                     # 真实调用 DeepSeek，会花钱
+pnpm eval -- --mode=live --repeat=3 --baseline=<上一次>/report.json
+```
+
+每次运行把 `report.json`、Markdown 报告和所有失败用例的完整工程写到 `evals/results/<时间戳>/`。
+`--baseline` 指向上一次的 `report.json` 时，报告末尾会多出「回归」与「修复」两张清单——
+指标涨了但某个用例坏了，这件事只有逐用例对比才看得见。详见 [`evals/README.md`](evals/README.md)。
+
 ## 目录
 
 ```text
@@ -173,6 +188,7 @@ src/server/template/     锁定游戏工程模板
 src/server/workspace/    文件边界与日志脱敏
 src/server/build/        Inline/Sandbox 构建器
 supabase/migrations/     Schema、RLS、额度 RPC
+evals/                   离线评测：数据集、运行器、判分器
 ```
 
 ## 自行部署所需的外部配置
