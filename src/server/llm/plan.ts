@@ -7,6 +7,55 @@ export const clarifyingQuestionSchema = z.object({
   options: z.array(z.string().min(1).max(120)).min(2).max(4),
 });
 
+/** As many as the prompt asks for; more is trimmed, never fatal. */
+export const MAX_QUESTIONS = 6;
+const MAX_OPTIONS = 4;
+
+/**
+ * One question, repaired where it can be and dropped where it cannot.
+ *
+ * Too many options are trimmed and over-long text is cut. Only a question with
+ * fewer than two usable options is unusable: it cannot be answered by picking.
+ */
+const lenientQuestionSchema = z.object({
+  question: z
+    .string()
+    .trim()
+    .min(1)
+    .transform((text) => text.slice(0, 300)),
+  options: z
+    .array(z.unknown())
+    .transform((options) =>
+      options
+        .filter((option): option is string => typeof option === "string")
+        .map((option) => option.trim().slice(0, 120))
+        .filter(Boolean)
+        .slice(0, MAX_OPTIONS),
+    )
+    .pipe(z.array(z.string()).min(2)),
+});
+
+/**
+ * Questions are kept one by one.
+ *
+ * The array used to be validated as a whole with `.max(4).catch([])`, so a
+ * model that asked five questions — or got one option list wrong — lost all
+ * of them without a trace. The plan then had neither questions nor changes,
+ * and a request that explicitly said "ask me first" went to the answer step,
+ * which replied with prose questions about platforms the project cannot use.
+ */
+const questionsSchema = z
+  .array(z.unknown())
+  .catch([])
+  .transform((items) =>
+    items
+      .flatMap((item) => {
+        const parsed = lenientQuestionSchema.safeParse(item);
+        return parsed.success ? [parsed.data] : [];
+      })
+      .slice(0, MAX_QUESTIONS),
+  );
+
 /**
  * Only `understanding` is required.
  *
@@ -49,7 +98,7 @@ export const generationPlanSchema = z.object({
     .catch([])
     .default([]),
   assumptions: z.array(z.string().min(1).max(300)).max(10).catch([]).default([]),
-  questions: z.array(clarifyingQuestionSchema).max(4).catch([]).default([]),
+  questions: questionsSchema,
   /** Absent means "carry the previous spec forward unchanged". */
   spec: projectSpecSchema.optional().catch(undefined),
   changeSummary: z.string().min(1).max(300).catch(FALLBACK_CHANGE_SUMMARY),

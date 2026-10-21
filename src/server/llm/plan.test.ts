@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   FALLBACK_CHANGE_SUMMARY,
+  MAX_QUESTIONS,
   generationPlanSchema,
   planIntent,
   planNeedsClarification,
@@ -131,5 +132,58 @@ describe("planIntent", () => {
     });
     expect(plan.intent).toBeUndefined();
     expect(planIntent(plan)).toBe("change");
+  });
+});
+
+/**
+ * Questions used to be validated as one array with `.max(4).catch([])`. A
+ * request that said "ask me everything first" produced six questions, lost all
+ * of them, and fell through to a prose answer that asked about Unity.
+ */
+describe("question tolerance", () => {
+  const question = (index: number, options = ["是", "否"]) => ({
+    question: `问题 ${index}`,
+    options,
+  });
+
+  it("keeps up to the limit and trims the rest instead of dropping all", () => {
+    const plan = generationPlanSchema.parse({
+      understanding: "x",
+      questions: Array.from({ length: MAX_QUESTIONS + 2 }, (_, index) =>
+        question(index),
+      ),
+    });
+    expect(plan.questions).toHaveLength(MAX_QUESTIONS);
+    expect(plan.questions[0].question).toBe("问题 0");
+    expect(planIntent(plan)).toBe("clarify");
+  });
+
+  it("drops only the question that cannot be answered by picking", () => {
+    const plan = generationPlanSchema.parse({
+      understanding: "x",
+      questions: [question(1), question(2, ["只有一个选项"]), question(3), "bad"],
+    });
+    expect(plan.questions.map((item) => item.question)).toEqual([
+      "问题 1",
+      "问题 3",
+    ]);
+  });
+
+  it("trims an over-long option list rather than rejecting the question", () => {
+    const plan = generationPlanSchema.parse({
+      understanding: "x",
+      questions: [question(1, ["a", "b", "c", "d", "e", ""])],
+    });
+    expect(plan.questions[0].options).toEqual(["a", "b", "c", "d"]);
+  });
+
+  it("treats a missing or malformed list as no questions", () => {
+    expect(generationPlanSchema.parse({ understanding: "x" }).questions).toEqual(
+      [],
+    );
+    expect(
+      generationPlanSchema.parse({ understanding: "x", questions: "none" })
+        .questions,
+    ).toEqual([]);
   });
 });

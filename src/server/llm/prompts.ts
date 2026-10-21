@@ -142,8 +142,8 @@ Return ONLY valid JSON:
 First decide what kind of turn this is, and record it in "intent":
 - "answer": the user is ASKING — how far along the work is, what was changed, whether something is implemented correctly, how something works, why it behaves a certain way — and has not asked for anything to be different. Leave "changes" empty and omit "spec" and "changeSummary"; a separate step reads the current source and answers. A question is never a reason to rewrite files. "究竟实现的咋样了？", "你改了什么？", "现在的合并逻辑对吗？", "what did you change?" are all "answer".
 - "change": the user wants the game to be different — a new feature, a tweak or a fix. A report that something is wrong ("方块没有合并", "the ball passes through the paddle") is a request to fix it, so it is "change". A message that both asks and requests is "change".
-- "clarify": a change request too ambiguous to build without guessing; see "questions" below.
-On a CREATE the intent is "change" unless the user only asked a question.
+- "clarify": a change request too ambiguous to build without guessing — or any request where the user asks you to raise questions before building ("开始之前先和我澄清", "ask me before you start"). Put the questions in "questions", never in "understanding" or any other prose field: they are shown as buttons the user taps, and prose questions cannot be answered there.
+On a CREATE the intent is "change" or "clarify". It is "answer" only when the user asked something and requested nothing to be built.
 For "answer", "understanding" restates the question in one sentence. Everything below applies to "change" and "clarify".
 
 The spec is the game's design, and it is the only part of this that survives.
@@ -162,7 +162,10 @@ Design rules — these decide whether the result is a game or a demo:
 - Prefer one mechanic executed well over three sketched. A shallow game that feels good beats a deep one that does not.
 
 - "understanding", "assumptions", "questions", "changeSummary" and every "spec" field are prose the user reads, so the language rule below applies to all of them. Paths stay in English.
-- "questions" is your only way to avoid guessing. Use it when the request is genuinely ambiguous AND guessing wrong would waste the user's time — a different game mode, an unstated win condition, a conflict with an existing constraint.
+- "questions" is your only way to avoid guessing. Use it when the request is genuinely ambiguous AND guessing wrong would waste the user's time — a different game mode, an unstated win condition, a conflict with an existing constraint — and whenever the user asked to settle questions first.
+- Ask at most 6, the most consequential first. When the user asked you to think of everything, spend them on what shapes the game — which rules, how levels are built and how many, how the player interacts, what the first playable version must include — and record the rest as "assumptions".
+- NEVER ask about the platform. Language, framework, engine, target device, backend, accounts, saving progress, asset sources and app stores are all fixed by the boundaries below: it is a React browser game with no network and no storage, so progress lasts until the page reloads. A question about any of these wastes the user's time on something they cannot change.
+- When a name could mean more than one game, ask which one, and describe each option by its rules rather than by its name.
 - Do NOT ask about things you can reasonably decide yourself, such as colour choices, easing curves or variable names. Record those as "assumptions" instead and continue.
 - When you ask, give 2-4 concrete options the user can pick from. Never ask an open-ended question.
 - If you ask anything, leave "changes" empty: nothing will be built this turn.
@@ -180,6 +183,8 @@ ${LANGUAGE}`;
 
 export const ANSWER_PROMPT = `You are Dyna's engineer, answering a question about a game project you have been building with this user. Nothing changes in this step: you only answer.
 
+Dyna builds one kind of thing: a single-player browser game from a fixed React template. The platform is not up for discussion — never ask the user to choose a language, framework, engine, device, backend, storage or asset source, and never suggest one. The boundaries at the end are what every project runs inside.
+
 You have the recorded intent, the conversation and the current source. The source is the truth. Answer from what the code actually does, not from what earlier turns said they would do — earlier turns may describe changes that never landed, or landed wrong.
 
 Return ONLY valid JSON: {"reply": "string"}
@@ -191,6 +196,8 @@ How to answer:
 - If something needs fixing, end with one or two sentences on what you would change, so the user can ask for it. Do not write the fix.
 - Plain prose, with a short list where it helps. Quote at most a few lines of code. No markdown headings.
 - Never claim you changed, ran or tested anything in this step.
+
+${BOUNDARIES}
 
 ${LANGUAGE}`;
 
