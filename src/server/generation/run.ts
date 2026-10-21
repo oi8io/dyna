@@ -48,8 +48,11 @@ const PLAN_MAX_MS = 60_000;
  * A create designs the game, with reasoning on and the stronger model, so it
  * needs room. Timing out here is worse than waiting: the run fails before it
  * has produced anything, and the retry pays for the same thinking again.
+ *
+ * Three minutes of reasoning plus one kept for designing without it, should
+ * the reasoning not finish — see the provider's `plan`.
  */
-const DESIGN_MAX_MS = 180_000;
+const DESIGN_MAX_MS = 240_000;
 /** Left for the build and for persisting, after the last model call. */
 const TAIL_RESERVE_MS = 100_000;
 /** Below this, a repair pass cannot finish, so it is not started. */
@@ -100,9 +103,16 @@ export interface ExecuteGenerationInput {
   emit: (event: GenerationEvent) => void;
 }
 
+/**
+ * Names the stage a timeout happened in.
+ *
+ * The provider reports which clock fired but not which step it was serving,
+ * so a bare "deadline_timed_out after 180s" left the reader to work out from
+ * the number whether planning or writing had run out of time.
+ */
 function labelStage(error: unknown, stage: string): unknown {
   const message = error instanceof Error ? error.message : String(error);
-  if (/abort/i.test(message)) {
+  if (/abort|timed_out/i.test(message) && !message.startsWith(`${stage}_`)) {
     return new Error(`${stage}_timed_out: ${message}`);
   }
   return error;

@@ -81,6 +81,11 @@ const NO_THINKING_RESERVE_MS = 150_000;
 const NO_THINKING_RESERVE_SHARE = 0.4;
 /** Below this, reasoning would be cut off before it got anywhere. */
 const MIN_THINKING_MS = 90_000;
+/**
+ * The design step's fallback writes a plan, not a game: a few thousand tokens
+ * of JSON, so a minute without reasoning is enough.
+ */
+const PLAN_NO_THINKING_RESERVE_MS = 60_000;
 
 interface DeepSeekStreamChunk {
   choices?: Array<{
@@ -333,20 +338,22 @@ async function callWithReasoningFallback(
     thinking: boolean;
     onProgress?: (delta: StreamDelta) => void;
     timeoutMs?: number;
+    /** Time kept for the no-reasoning fallback; defaults to the write step's. */
+    reserveMs?: number;
   },
 ) {
   const env = getServerEnv();
   const startedAt = Date.now();
-  const budget = options.timeoutMs ?? env.DEEPSEEK_TIMEOUT_MS;
-  const reserve = Math.max(
-    NO_THINKING_RESERVE_MS,
-    budget * NO_THINKING_RESERVE_SHARE,
-  );
+  const { reserveMs, ...callOptions } = options;
+  const budget = callOptions.timeoutMs ?? env.DEEPSEEK_TIMEOUT_MS;
+  const reserve =
+    reserveMs ??
+    Math.max(NO_THINKING_RESERVE_MS, budget * NO_THINKING_RESERVE_SHARE);
 
-  if (options.thinking && budget - reserve >= MIN_THINKING_MS) {
+  if (callOptions.thinking && budget - reserve >= MIN_THINKING_MS) {
     try {
       return await callDeepSeek(messages, {
-        ...options,
+        ...callOptions,
         thinking: true,
         timeoutMs: budget - reserve,
       });
@@ -354,12 +361,12 @@ async function callWithReasoningFallback(
       if (!isReasoningFailure(error)) throw error;
       console.warn("[deepseek_reasoning_fallback]", errorMessage(error));
       // The counter would otherwise sit at the abandoned attempt's total.
-      options.onProgress?.({ type: "thinking", chars: 0 });
+      callOptions.onProgress?.({ type: "thinking", chars: 0 });
     }
   }
 
   return callDeepSeek(messages, {
-    ...options,
+    ...callOptions,
     thinking: false,
     timeoutMs: budget - (Date.now() - startedAt),
   });
@@ -492,7 +499,7 @@ export class DeepSeekGameProvider implements GameGenerationProvider {
 
   async plan(input: PlanInput): Promise<PlanResult> {
     const env = getServerEnv();
-    const { content, usage } = await callDeepSeek(
+    const { content, usage } = await callWithReasoningFallback(
       [
         { role: "system", content: PLAN_PROMPT },
         {
@@ -513,12 +520,18 @@ export class DeepSeekGameProvider implements GameGenerationProvider {
       // temperature to make a choice rather than average over the obvious ones.
       // It was previously done by the small model with reasoning off at 0.1,
       // which is tuned to do the opposite of design, and it showed.
+      //
+      // Its reasoning is open-ended, though — "think of every open question
+      // first" ran past the whole stage budget and the run produced nothing.
+      // So reasoning gets most of the budget and the last minute is kept to
+      // design without it.
       input.kind === "create"
         ? {
             temperature: 0.8,
             model: env.DEEPSEEK_MODEL,
             thinking: true,
             timeoutMs: input.timeoutMs,
+            reserveMs: PLAN_NO_THINKING_RESERVE_MS,
           }
         : {
             temperature: 0.1,

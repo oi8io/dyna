@@ -24,6 +24,22 @@ describe("generationErrorCode", () => {
     );
   });
 
+  it("names the stage a labelled timeout happened in", () => {
+    // run.ts prefixes the stage; planning has its own copy for the reader.
+    expect(
+      generationErrorCode(
+        new Error(
+          "plan_timed_out: deepseek_deadline_timed_out: deepseek-v4-pro without reasoning, after 60s",
+        ),
+      ),
+    ).toBe("plan_timed_out");
+    expect(
+      generationErrorCode(
+        new Error("write_timed_out: deepseek_idle_timed_out: after 45s"),
+      ),
+    ).toBe("step_timed_out");
+  });
+
   it("classifies either model clock as a timeout", () => {
     expect(
       generationErrorCode(new Error("deepseek_idle_timed_out: after 45s")),
